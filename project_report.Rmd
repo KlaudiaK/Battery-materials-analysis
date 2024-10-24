@@ -1,0 +1,19 @@
+---
+title: "Programowanie w R: Projekt"
+subtitle:   "Analiza bazy danych materiałów wykorzystywanych w tworzeniu baterii"
+author: Klaudia Kowalska
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+
+```{r}
+getwd()
+
+data <- read.csv("...\\mp_batteries.csv")
+
+head(data)
+```
