@@ -3,17 +3,206 @@ title: "Programowanie w R: Projekt"
 subtitle:   "Analiza bazy danych materiałów wykorzystywanych w tworzeniu baterii"
 author: Klaudia Kowalska
 date: "`r format(Sys.time(), '%d %B %Y')`"
-output: html_notebook
+output: 
+  html_notebook:
+    toc: true
 editor_options: 
   chunk_output_type: inline
 ---
 
 
+# Wstęp
+
+```{r global options, include = FALSE}
+knitr::opts_chunk$set(echo=FALSE, include = FALSE, warning=FALSE, message=FALSE)
+```
+
+## Wykorzystane biblioteki
+```{r echo=FALSE, results='hide'}
+library(skimr)
+library(corrplot)
+library(GGally)
+library(dplyr)
+library("Hmisc")
+```
+
+Załadowanie i wyświelenie danych, dane są cache'owane
+
+```{r load data, echo = FALSE, cache = TRUE, results=FALSE}
+data <- read.csv("D:\\studia\\magisterka\\ZED\\Projekt_R\\mp_batteries.csv")
+```
 
 ```{r}
-getwd()
-
-data <- read.csv("...\\mp_batteries.csv")
-
 head(data)
 ```
+
+## Rozmiar zbioru i podsumowanie 
+```{r}
+dim(data)
+```
+Zbiór danych ma 17 atrybutów i 4351 rekordów.
+
+```{r}
+sum(is.na(data))
+```
+
+Zbiór nie zawiera wartości brakujących.
+
+### Krótkie podsumowanie zbioru
+
+```{r}
+skim(data)
+```
+Zbiór zawiera 10 atrybutów numerycznych i 5 znakowe i 3 kategoryczne.
+
+```{r}
+data %>%
+  skim() %>%
+  focus(n_missing)
+```
+
+```{r}
+data %>%
+  select(Working.Ion, Max.Delta.Volume:Stability.Discharge) %>%
+  group_by(Working.Ion) %>%
+  summarise(across(everything(), mean))
+
+```
+
+
+Aby wyniki były powtarzalne, należy ustawić seed na stałą wartość.
+```{r}
+set.seed(12)
+```
+
+### Analiza atrybutów kategorycznych
+```{r echo = FALSE}
+working_ion_summary <- data %>%
+  group_by(Working.Ion) %>%
+  summarise(total = n())
+working_ion_summary
+
+data %>%
+  group_by(Working.Ion) %>%
+  summarise(total_ion = n()) %>%
+  ggplot() +
+   labs(title = paste("Rozkład głównych jonów, które odpowiadają za transport ładunku w baterii"),
+           x = "Working.Ion",
+           y = "Count") +
+      geom_bar(aes(x = reorder(Working.Ion, total_ion), y = total_ion, fill = Working.Ion), stat = "identity") +
+      theme_minimal() 
+```
+Na przedstawionym wykresie zaprezentowano rozkład różnych głównych jonów używanych do transportu ładunku w bateriach. Wyraźnie dominuje lit (Li), który występuje znacznie częściej niż inne jony. Sugeruje to powszechne zastosowanie technologii opartych na litowo-jonowych rozwiązaniach, co jest zgodne z ich szerokim wykorzystaniem w przemyśle elektroniki i magazynowania energii. Pozostałe jony, takie jak wapń (Ca), magnez (Mg), i cynk (Zn), również znajdują zastosowanie, ale w znacznie mniejszym zakresie. Obecność jonów takich jak sód (Na) i potas (K) wskazuje na badania nad alternatywami dla litu, jednak ich zastosowanie jest obecnie ograniczone.
+
+```{r echo = FALSE}
+unique(data["Formula.Charge"])
+formula_charge_summary <- data %>%
+  group_by(Formula.Charge) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total))
+formula_charge_summary
+
+percentile_99 <- quantile(select(formula_charge_summary, total), probs = 0.99, na.rm = TRUE)
+formula_charge_values_99_percentile <- formula_charge_summary %>%
+  filter(total >= percentile_99)
+
+formula_charge_values_99_percentile
+
+formula_charge_values_99_percentile %>%
+  ggplot() +
+   labs(title = paste("Wzóry chemiczne materiału baterii w stanie naładowanym"),
+           x = "Formula Charge",
+           y = "Count") +
+      geom_bar(aes(x = reorder(Formula.Charge, total), y = total, fill = Formula.Charge), stat = "identity",  width = 0.5) +
+      theme(
+        text = element_text(size = 12),
+        axis.text.x = element_text(angle = 90, hjust = 1, size = 8)
+      )
+```
+Najczęściej występującymi wzorami są MnO2, TiO2, Vo2, CrO2, NiO2, FeO2. Wszystkie zawierają cząsteczkę O2.
+
+```{r}
+ggplot(data, aes(x = Average.Voltage)) +
+    geom_density(fill = "skyblue", alpha = 0.5) +
+    labs(title = "Density Plot of Max.Delta.Volume",
+         x = "Max Delta Volume",
+         y = "Density") +
+    theme_minimal()
+```
+
+```{r}
+
+continous_data <- select(data, (Max.Delta.Volume:Stability.Discharge))
+  
+continous_data                       
+for (attr_name in names(continous_data)) {
+  p <-  ggplot(continous_data, aes_string(x = attr_name)) +
+   geom_histogram(binwidth = 1, fill = "skyblue", color = "black") +
+    labs(title = paste("Density Plot of", attr_name),
+         x = attr_name,
+         y = "Density") +
+    theme_minimal()
+  print(p)
+}               
+                        
+
+
+```
+## Korelacja zmiennych
+
+```{r}
+library(corrplot)
+
+number_attr_data <- select(data, (Max.Delta.Volume:Max.Voltage.Step)
+
+corrplot(cor(number_attr_data),
+  method = "number",
+  type = "upper",
+  tl.cex = 0.8, 
+  number.cex = 0.5
+)
+```
+
+Najwyższy wspolczynnik koorelacji wystepuje pomiedzy parami atrybutów:
+- Gravimetric Energy i Volumetric Energy
+- Gravimetric Capcity i Volumetric Capacity
+- Stability Charge i Stability Discharge
+- Gravimetric Capacity i Atomic Fraction Discharge
+- Average Voltage i Gravimetric Energy 
+
+
+## Wizualizacja interaktywnych wykresów pudełkowych
+
+```{r}
+library(plotly)
+
+for (attr_name in names(number_attr_data)) {
+  p <- plot_ly(
+    number_attr_data, 
+    y = ~get(attr_name),
+    type = "box",
+    boxpoints = "all",
+    jitter = 0.3,
+    pointpos = -1.8
+  ) %>%
+    layout(
+      title = paste("Boxplot of", attr_name),
+      yaxis = list(title = attr_name)
+    )
+
+  print(p)
+}
+
+```
+
+
+```{r}
+# Perform ANOVA
+#anova_result <- aov(Max.Delta.Volume ~ Battery.Formula, data = data)
+#summary(anova_result)
+
+anova_result <- aov(Volumetric.Energy ~ Battery.Formula, data = data)
+summary(anova_result)
+```
+
+
