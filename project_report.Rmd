@@ -6,6 +6,7 @@ date: "`r format(Sys.time(), '%d %B %Y')`"
 output: 
   html_notebook:
     toc: true
+    toc_float: true
 editor_options: 
   chunk_output_type: inline
 ---
@@ -14,51 +15,103 @@ editor_options:
 # Wstęp
 
 ```{r global options, include = FALSE}
-knitr::opts_chunk$set(echo=FALSE, include = FALSE, warning=FALSE, message=FALSE)
+#knitr::opts_chunk$set(echo=FALSE, include = FALSE, warning=FALSE, message=FALSE)
+set.seed(12)
 ```
 
 ## Wykorzystane biblioteki
+
+- **skimr** - Umożliwia szybkie i przejrzyste generowanie statystyk opisowych dla zbiorów danych, dostarczając podsumowania dostosowane do różnych typów zmiennych. 
+- **corrplot** - Służy do wizualizacji macierzy korelacji. 
+- **GGally** - Rozszerza możliwości ggplot2, umożliwiając tworzenie zaawansowanych wizualizacji, takich jak macierze par wykresów czy korelogramy, co jest przydatne w analizie wielowymiarowej. 
+- **dplyr** - Zapewnia zestaw funkcji do manipulacji danymi w sposób deklaratywny i czytelny, umożliwiając filtrowanie, sortowanie, grupowanie oraz agregowanie danych w ramach złożonych operacji. 
+- **plotly** - Pozwala na tworzenie interaktywnych wykresów. 
+- **caret** - Ułatwia proces budowy modeli predykcyjnych, oferując narzędzia do przygotowania danych, selekcji cech, tuningu hiperparametrów oraz oceny modeli w spójny i zintegrowany sposób.
+
+
 ```{r echo=FALSE, results='hide'}
 library(skimr)
 library(corrplot)
 library(GGally)
 library(dplyr)
+library(plotly)
 library("Hmisc")
+library(mlbench)
+library(caret)
+library(rlang)
+library(knitr)
+library(DT)
+library(dplyr)
 ```
 
-Załadowanie i wyświelenie danych, dane są cache'owane
+Próbka zbioru danych o materiałach wykorzystywanych w bateriach.
 
 ```{r load data, echo = FALSE, cache = TRUE, results=FALSE}
+#urlfile="https://raw.githubusercontent.com/KlaudiaK/Battery-materials-analysis/refs/heads/master/mp_batteries.csv"
+#data <- read.csv(url(urlfile))
+
 data <- read.csv("D:\\studia\\magisterka\\ZED\\Projekt_R\\mp_batteries.csv")
 ```
 
-```{r}
+```{r, echo=FALSE}
 head(data)
 ```
 
 ## Rozmiar zbioru i podsumowanie 
-```{r}
-dim(data)
-```
-Zbiór danych ma 17 atrybutów i 4351 rekordów.
 
-```{r}
-sum(is.na(data))
+Zbiór danych ma `r ncol(data)` atrybutów i `r nrow(data)` rekordów.
+
+```{r count_na_values, include=FALSE}
+sum_na <- sum(is.na(data))
 ```
 
-Zbiór nie zawiera wartości brakujących.
+Suma brakujących wartości w zbiorze wynosi .
+
+## Atrybuty
+
+- **Battery ID**: Identyfikator baterii.
+- **Battery Formula**: Wzór chemiczny materiału baterii.
+- **Working Ion**: Główny jon, który odpowiada za transport ładunku w baterii.
+- **Formula Charge**: Wzór chemiczny materiału baterii w stanie naładowanym.
+- **Formula Discharge**: Wzór chemiczny materiału baterii w stanie rozładowanym.
+- **Max Delta Volume**: Zmiana objętości w % dla danego kroku napięcia za pomocą wzoru: max(charge, discharge)/min(charge, discharge) -1.
+- **Average Voltage**: Średnie napięcie dla poszczególnego kroku napięcia.
+- **Gravimetric Capacity**: Pojemność grawimetryczna, czyli ilość energii na jednostkę masy (mAh/g).
+- **Volumetric Capacity**: Pojemność wolumetryczna, czyli ilość energii na jednostkę objętości (mAh/cm³).
+- **Gravimetric Energy**: Gęstość energii w odniesieniu do masy baterii (Wh/kg).
+- **Volumetric Energy**: Gęstość energii w odniesieniu do objętości baterii (Wh/L).
+- **Atomic Fraction Charge**: Udział atomowy składników w stanie naładowanym.
+- **Atomic Fraction Discharge**: Udział atomowy składników w stanie rozładowanym.
+- **Stability Charge**: Wskaźnik stabilności materiału w stanie naładowanym.
+- **Stability Discharge**: Wskaźnik stabilności materiału w stanie rozładowanym.
+- **Steps**: Liczba odrębnych kroków napięcia od pełnego naładowania do rozładowania, oparta na stabilnych stanach pośrednich.
+- **Max Voltage Step**: Maksymalna bezwzględna różnica między sąsiednimi krokami napięcia.
+
+```{r prt, echo=FALSE}
+prettyTable <- function(table_df, round_digits=2) {
+    DT::datatable(table_df, style="bootstrap", filter = "top", rownames = FALSE, extensions = "Buttons", options = list(dom = 'Bfrtip', buttons = c('copy', 'csv', 'excel', 'pdf', 'print'))) %>% formatRound(names(dplyr::select_if(table_df, is.numeric)), round_digits)
+}
+```
 
 ### Krótkie podsumowanie zbioru
 
-```{r}
-skim(data)
+```{rm echo=FALSE}
+skim_summary <- skim(data)
+
+num_character <- skim_summary %>% filter(skim_type == "character") %>% nrow()
+num_numeric <- skim_summary %>% filter(skim_type == "numeric") %>% nrow()
+num_logical <- skim_summary %>% filter(skim_type == "logical") %>% nrow()
 ```
-Zbiór zawiera 10 atrybutów numerycznych i 5 znakowe i 3 kategoryczne.
+
+Zbiór zawiera 12 atrybutów numerycznych i 5 znakowych w tym 3 kategoryczne.
+
+Typy kolumn:
+- `r num_character` kolumny znakowe,
+- `r num_numeric` kolumny numeryczne,
+- `r num_logical` kolumny logiczne (jeśli istnieją).
 
 ```{r}
-data %>%
-  skim() %>%
-  focus(n_missing)
+numerical_attrs <- colnames(select(data, (Max.Delta.Volume : Max.Voltage.Step)))
 ```
 
 ```{r}
@@ -69,18 +122,11 @@ data %>%
 
 ```
 
-
-Aby wyniki były powtarzalne, należy ustawić seed na stałą wartość.
-```{r}
-set.seed(12)
-```
-
 ### Analiza atrybutów kategorycznych
+
+#### Rozkład główneych jonów
+
 ```{r echo = FALSE}
-working_ion_summary <- data %>%
-  group_by(Working.Ion) %>%
-  summarise(total = n())
-working_ion_summary
 
 data %>%
   group_by(Working.Ion) %>%
@@ -94,13 +140,16 @@ data %>%
 ```
 Na przedstawionym wykresie zaprezentowano rozkład różnych głównych jonów używanych do transportu ładunku w bateriach. Wyraźnie dominuje lit (Li), który występuje znacznie częściej niż inne jony. Sugeruje to powszechne zastosowanie technologii opartych na litowo-jonowych rozwiązaniach, co jest zgodne z ich szerokim wykorzystaniem w przemyśle elektroniki i magazynowania energii. Pozostałe jony, takie jak wapń (Ca), magnez (Mg), i cynk (Zn), również znajdują zastosowanie, ale w znacznie mniejszym zakresie. Obecność jonów takich jak sód (Na) i potas (K) wskazuje na badania nad alternatywami dla litu, jednak ich zastosowanie jest obecnie ograniczone.
 
+
+#### Wzory chemiczne materiału baterii
+
 ```{r echo = FALSE}
-unique(data["Formula.Charge"])
+print(count(unique(data["Formula.Charge"])))
+
 formula_charge_summary <- data %>%
   group_by(Formula.Charge) %>%
   summarise(total = n()) %>%
   arrange(desc(total))
-formula_charge_summary
 
 percentile_99 <- quantile(select(formula_charge_summary, total), probs = 0.99, na.rm = TRUE)
 formula_charge_values_99_percentile <- formula_charge_summary %>%
@@ -119,63 +168,198 @@ formula_charge_values_99_percentile %>%
         axis.text.x = element_text(angle = 90, hjust = 1, size = 8)
       )
 ```
-Najczęściej występującymi wzorami są MnO2, TiO2, Vo2, CrO2, NiO2, FeO2. Wszystkie zawierają cząsteczkę O2.
+W zbiorze jest 2096 różnych wzorów chemicznych materiałów baterii. Najczęściej występującymi wzorami są MnO2, TiO2, Vo2, CrO2, NiO2, FeO2.
 
-```{r}
-ggplot(data, aes(x = Average.Voltage)) +
-    geom_density(fill = "skyblue", alpha = 0.5) +
-    labs(title = "Density Plot of Max.Delta.Volume",
-         x = "Max Delta Volume",
-         y = "Density") +
-    theme_minimal()
-```
+#### 
+
 
 ```{r}
 
 continous_data <- select(data, (Max.Delta.Volume:Stability.Discharge))
-  
-continous_data                       
+
 for (attr_name in names(continous_data)) {
-  p <-  ggplot(continous_data, aes_string(x = attr_name)) +
-   geom_histogram(binwidth = 1, fill = "skyblue", color = "black") +
+  p <- ggplot(data, aes_string(x = attr_name)) +
+    geom_density(fill = "skyblue", alpha = 0.5) +
     labs(title = paste("Density Plot of", attr_name),
-         x = attr_name,
+         x = "Max Delta Volume",
          y = "Density") +
     theme_minimal()
   print(p)
 }               
                         
 
-
 ```
 ## Korelacja zmiennych
 
-```{r}
-library(corrplot)
+```{r, echo=FALSE}
+number_attr_data <- select(data, (Max.Delta.Volume:Max.Voltage.Step))
 
-number_attr_data <- select(data, (Max.Delta.Volume:Max.Voltage.Step)
+cor_data <- cor(number_attr_data)
 
-corrplot(cor(number_attr_data),
-  method = "number",
-  type = "upper",
-  tl.cex = 0.8, 
-  number.cex = 0.5
+corrplot.mixed(cor_data,
+  tl.pos = 'lt',
+  number.cex = 0.5,
+  order = 'AOE'
 )
 ```
 
-Najwyższy wspolczynnik koorelacji wystepuje pomiedzy parami atrybutów:
-- Gravimetric Energy i Volumetric Energy
-- Gravimetric Capcity i Volumetric Capacity
-- Stability Charge i Stability Discharge
-- Gravimetric Capacity i Atomic Fraction Discharge
+Najwyższy wspolczynnik koorelacji wystepuje pomiedzy parami atrybutów:\
+- Gravimetric Energy i Volumetric Energy \
+- Gravimetric Capcity i Volumetric Capacity \
+- Stability Charge i Stability Discharge \
+- Gravimetric Capacity i Atomic Fraction Discharge \
 - Average Voltage i Gravimetric Energy 
 
+### Wykres korelacji pomiędzy energią grawimetryczną i wolumetryczną
+
+```{r}
+correlation <- cor(data$Gravimetric.Energy, data$Volumetric.Energy, use = "complete.obs")
+
+ggplot(data, aes(x = Gravimetric.Energy, y = Volumetric.Energy)) +
+  geom_point(color = "darkorange", size = 3, alpha = 0.7) +
+  geom_smooth(method = "lm", color = "blue", se = FALSE, linetype = "dashed") +
+  labs(title = "Energy Density Relationship",
+       subtitle = paste("Correlation =", round(correlation, 2)),
+       x = "Gravimetric Energy Density (Wh/kg)",
+       y = "Volumetric Energy Density (Wh/L)") +
+  theme_light()
+```
+Wykres przedstawia **zależność między gęstością energii wolumetryczną** (Wh/L, energia na jednostkę objętości) **a grawimetryczną** (Wh/kg, energia na jednostkę masy), gdzie widoczna jest **silna korelacja** dodatnia między tymi parametrami. Gęstość energii jest **kluczowym wskaźnikiem wydajności baterii** - im wyższa wartość, tym więcej energii może być zmagazynowane w danej objętości lub masie baterii, co jest szczególnie istotne w zastosowaniach mobilnych, takich jak pojazdy elektryczne czy urządzenia przenośne. **Większość badanych materiałów skupia się w zakresie do 2000 Wh/kg i 7500 Wh/L**, choć występuje kilka obiecujących wyjątków o wyższych parametrach, które mogą stanowić potencjalne kierunki rozwoju nowych, wydajniejszych baterii.
+
+
+### Wykres korelacji pomiędzy pojemnością grawimetryczną i wolumetryczną
+
+```{r}
+correlation <- cor(data$Gravimetric.Capacity, data$Volumetric.Capacity, use = "complete.obs")
+
+ggplot(data, aes(x = Gravimetric.Capacity, y = Volumetric.Capacity)) +
+  geom_point(color = "darkorange", size = 3, alpha = 0.7) +
+  geom_smooth(method = "lm", color = "blue", se = FALSE) +
+  labs(title = "Relationship Between Gravimetric and Volumetric Capacity",
+       subtitle = paste("Correlation =", round(correlation, 2)),
+       x = "Gravimetric Capacity (mAh/g)",
+       y = "Volumetric Capacity (mAh/cm³)") +
+  theme_light()
+
+```
+Wykres przedstawia **zależność między pojemnością wolumetryczną** (mAh/cm³, ilość ładunku na jednostkę objętości) **a grawimetryczną** (mAh/g, ilość ładunku na jednostkę masy) materiałów, gdzie pojemność grawimetryczna określa ile energii można zmagazynować w danej masie materiału, a wolumetryczna - ile w danej objętości, co ma kluczowe znaczenie przy projektowaniu baterii o różnym przeznaczeniu. **Współczynnik korelacji 0.86 wskazuje na silną zależność między tymi parametrami**, choć nie tak silną jak w przypadku gęstości energii. Na przykład, materiał o wysokiej pojemności grawimetrycznej może być lekki, ale zajmować dużo miejsca, podczas gdy materiał o wysokiej pojemności wolumetrycznej może być cięższy, ale bardziej kompaktowy - wybór między nimi zależy od konkretnego zastosowania baterii.
+
+### Wykres korelacji pomiędzy stabilnością materiału w stanie naładowanym i rozładowanym
+
+```{r}
+correlation <- cor(data$Stability.Charge, data$Stability.Discharge, use = "complete.obs")
+
+ggplot(data, aes(x = Stability.Charge, y = Stability.Discharge)) +
+  geom_point(color = "darkgreen", size = 3, alpha = 0.7) +
+  geom_smooth(method = "lm", color = "blue", se = FALSE, linetype = "dashed") +
+  labs(title = "Stability Charge vs Stability Discharge",
+       subtitle = paste("Correlation =", round(correlation, 2)),
+       x = "Stability Charge",
+       y = "Stability Discharge") +
+  theme_minimal()
+
+```
+Wykres przedstawia **zależność między stabilnością materiału w stanie naładowanym** (Stability Charge) **a stabilnością w stanie rozładowanym** (Stability Discharge), ze współczynnikiem korelacji 0.8 wskazującym na silną dodatnią zależność. Stabilność materiału jest **kluczowym parametrem określającym, jak dobrze materiał zachowuje swoją strukturę i właściwości podczas cykli ładowania i rozładowania** - im niższa wartość, tym materiał jest bardziej stabilny i bezpieczny w użytkowaniu. Większość badanych materiałów skupia się w zakresie niskich wartości (0-2) dla obu parametrów, co jest pożądane, natomiast punkty odstające o wyższych wartościach (powyżej 4) mogą wskazywać na materiały problematyczne, które mogą być mniej odpowiednie do zastosowań w bateriach ze względu na potencjalną niestabilność.
+
+### Wykres korelacji pomiędzy pojemnością grawimetryczną i udział atomowym składników w stanie rozładowanym
+
+```{r}
+correlation <- cor(data$Gravimetric.Capacity, data$Atomic.Fraction.Discharge, use = "complete.obs")
+
+ggplot(data, aes(x = Gravimetric.Capacity, y = Atomic.Fraction.Discharge)) +
+  geom_point(aes(color = Atomic.Fraction.Discharge), size = 3, alpha = 0.7) +
+  geom_smooth(method = "loess", color = "red", se = TRUE, fill = "gray80") +
+  labs(title = "Gravimetric Capacity vs Atomic Fraction Discharge",
+       subtitle = paste("Correlation =", round(correlation, 2)),
+       x = "Gravimetric Capacity (mAh/g)",
+       y = "Atomic Fraction Discharge") +
+  scale_color_gradient(low = "orange", high = "purple") +
+  theme_light()
+
+```
+
+Wykres przedstawia zależność między pojemnością grawimetryczną (Gravimetric Capacity, mAh/g) a udziałem atomowym w stanie rozładowania (Atomic Fraction Discharge). Można zaobserwować umiarkowanie silną, dodatnią zależność, co potwierdza współczynnik korelacji wynoszący 0.68. W miarę wzrostu pojemności grawimetrycznej, udział atomowy w stanie rozładowania zwiększa się, osiągając wartość maksymalną bliską 1.0.
+
+Kolor punktów reprezentuje wartość Atomic Fraction Discharge, gdzie jaśniejsze kolory wskazują na niższe wartości, a ciemniejsze na wyższe. Dane wskazują, że większość obserwacji znajduje się w zakresie niskiej pojemności grawimetrycznej (<1000 mAh/g), a dla wartości powyżej 2000 mAh/g zależność staje się nieliniowa.
+
+Sugeruje to, że materiały o wyższej pojemności grawimetrycznej mają tendencję do osiągania wyższych udziałów atomowych w stanie rozładowania.
+
+```{r}
+unique(data$Steps)
+
+filteredData <- data %>%filter(data$Steps == 3)
+correlation <- cor(filteredData$Average.Voltage, filteredData$Gravimetric.Energy, use = "complete.obs")
+
+ggplot(filteredData, aes(x = Average.Voltage, y = Gravimetric.Energy)) +
+  geom_point(color = "darkblue", size = 3, alpha = 0.7) +
+  geom_smooth(method = "lm", color = "darkred", se = FALSE, linetype = "dashed") +
+  labs(title = "Average Voltage vs Gravimetric Energy",
+       subtitle = paste("Correlation =", round(correlation, 2)),
+       x = "Average Voltage (V)",
+       y = "Gravimetric Energy Density (Wh/kg)") +
+  theme_classic()
+
+```
+```{r}
+# Generowanie wykresów dla każdej wartości Steps
+p <- ggplot(data, aes(x = Average.Voltage, y = Gravimetric.Energy)) +
+  geom_point(color = "darkblue", size = 3, alpha = 0.7) +
+  geom_smooth(method = "lm", color = "darkred", se = FALSE, linetype = "dashed") +
+  facet_wrap(~ Steps, scales = "free") +
+  labs(title = "Average Voltage vs Gravimetric Energy for Each Step",
+       x = "Average Voltage (V)",
+       y = "Gravimetric Energy Density (Wh/kg)") +
+  theme_classic()
+ggplotly(p)
+
+```
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(plotly)
+
+# Oblicz korelacje dla każdej grupy
+data_with_cor <- data %>%
+  group_by(Steps) %>%
+  summarise(
+    correlation = cor(Average.Voltage, Gravimetric.Energy, use = "complete.obs"),
+    n_cases = n()  # Dodaj liczbę przypadków
+  )
+
+# Stwórz wykres
+p <- ggplot(data, aes(x = Average.Voltage, y = Gravimetric.Energy)) +
+  geom_point(color = "darkblue", size = 3, alpha = 0.7) +
+  geom_smooth(method = "lm", color = "darkred", se = FALSE, linetype = "dashed") +
+  facet_wrap(~ Steps, scales = "free", 
+             labeller = labeller(Steps = function(x) {
+               # Znajdź korelację dla danego etykiety
+                row <- data_with_cor[data_with_cor$Steps == x, ]
+               # Sformatuj etykietę z korelacją
+              paste0(x, " (Corr = ", round(row$correlation, 2), 
+                      ", n = ", row$n_cases, ")")
+             })) +
+  labs(
+    title = "Average Voltage vs Gravimetric Energy for Each Step",
+    x = "Average Voltage (V)",
+    y = "Gravimetric Energy Density (Wh/kg)"
+  ) +
+  theme_classic()
+
+# Konwersja do wykresu interaktywnego
+ggplotly(p)
+```
+
+Wykresy przedstawiają zależności między średnim napięciem (Average Voltage, V) a gęstością energii grawimetrycznej (Gravimetric Energy Density, Wh/kg) dla różnych wartości kroku napięcia.
+Dane wskazują, że wraz ze wzrostem średniego napięcia zwiększa się gęstość energii grawimetrycznej. Większość danych skupia się w zakresie niskich wartości napięcia (<10 V), co sugeruje, że materiały o wyższym napięciu są mniej liczne, ale wykazują większą efektywność energetyczną.
 
 ## Wizualizacja interaktywnych wykresów pudełkowych
 
-```{r}
-library(plotly)
 
+W tej części raportu przedstawiono interaktywne wykresy pudełkowe dla każdej zmiennej numerycznej w zbiorze danych. Wykresy te umożliwiają eksplorację rozkładu wartości, identyfikację potencjalnych wartości odstających oraz porównanie zmienności w każdej zmiennej.
+
+```{r interactive_boxplots}
 for (attr_name in names(number_attr_data)) {
   p <- plot_ly(
     number_attr_data, 
@@ -195,6 +379,186 @@ for (attr_name in names(number_attr_data)) {
 
 ```
 
+```{r}
+data %>%
+  group_by(Battery.Formula) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total))
+```
+
+```{r}
+data %>%
+  group_by(Battery.Formula) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total))
+```
+
+
+## Analiza właściwości
+
+### Stabilność w stanie naładowanym i rozładowanym
+
+**Stability Charge**
+
+- Określa stabilność materiału w baterii, gdy jest w pełni naładowany
+- Wyższa stabilność oznacza, że materiał będzie mniej podatny na uszkodzenia lub degradację podczas ładowania. Jest to istotne, aby zapewnić długotrwałe działanie baterii bez utraty jej właściwości.
+
+**Stability Discharge**
+
+- Określa stabilność materiału w baterii, gdy jest w pełni rozładowany.
+- Stabilność w stanie rozładowanym jest kluczowa dla utrzymania efektywności baterii przez wiele cykli ładowania i rozładowania. Zapewnia ona, że materiał nie ulegnie degradacji, co mogłoby prowadzić do zmniejszenia pojemności i żywotności baterii.
+
+
+```{r}
+summary_stability_charge_working_ion <- data %>%
+  group_by(Working.Ion) %>%
+  summarise(stability_charge_mean = mean(Stability.Charge),
+            stability_charge_median = median(Stability.Charge),
+            stability_charge_min = min(Stability.Charge),
+            stability_charge_max = max(Stability.Charge),
+            total = n()) %>%
+  arrange(desc(stability_charge_median))
+
+summary_stability_charge_working_ion
+
+ggplot(summary_stability_charge_working_ion, aes(x = total, y = stability_charge_median)) +
+  geom_point(color = "blue", size = 3) +
+  labs(
+    title = "Relation between Total and Stability Charge Mean",
+    x = "Total",
+    y = "Stability Charge Mean"
+  ) +
+  theme_minimal()
+
+plot_ly(summary_stability_charge_working_ion, x = ~total, y = ~stability_charge_median, type = 'scatter', mode = 'markers', text = ~paste(Working.Ion))
+
+summary_stability_discharge_working_ion <- data %>%
+  group_by(Working.Ion) %>%
+  summarise(stability_discharge_mean = mean(Stability.Discharge),
+            stability_discharge_median = median(Stability.Discharge),
+            stability_discharge_min = min(Stability.Discharge),
+            stability_discharge_max = max(Stability.Discharge),
+            total = n()) %>%
+  arrange(desc(stability_discharge_median))
+
+summary_stability_discharge_working_ion
+
+ggplot(summary_stability_discharge_working_ion, aes(x = total, y = stability_discharge_median, label = Working.Ion)) +
+  geom_point(color = "blue", size = 3) +
+  geom_label() +
+  labs(
+    title = "Relation between Total and Stability Discharge Mean",
+    x = "Total",
+    y = "Stability Discharge Mean"
+  ) +
+  theme_minimal()
+
+plot_ly(summary_stability_discharge_working_ion, x = ~total, y = ~stability_discharge_median, type = 'scatter', mode = 'markers', text = ~paste(Working.Ion))
+```
+Materiały, które wykazują najwyższą stabilność w stanie naładowanm to Y, Al, ZN, Ca, Mg, a w stanie rozładowanym Y, Mg, Zn, Al.
+
+
+```{r}
+summary_max_data_volume_working_ion <- data %>%
+  group_by(Working.Ion) %>%
+  summarise(max_data_volume_mean = mean(Max.Delta.Volume),
+            max_data_volume_median = median(Max.Delta.Volume),
+            max_data_volume_min = min(Max.Delta.Volume),
+            max_data_volume_max = max(Max.Delta.Volume),
+            total = n()) %>%
+  arrange(max_data_volume_mean)
+
+summary_max_data_volume_working_ion
+
+plot_ly(summary_max_data_volume_working_ion, x = ~total, y = ~max_data_volume_median, type = 'scatter', mode = 'markers', text = ~paste(Working.Ion))
+```
+
+
+
+### Pojemność i gęstość grawimetryczna
+
+**Pojemność Grawimetryczna**
+
+- Mierzy, ile energii elektrycznej bateria może przechować w przeliczeniu na jednostkę masy (mAh/g).
+- Im wyższa pojemność grawimetryczna, tym więcej energii bateria może przechowywać przy tej samej masie. Jest to istotne dla urządzeń przenośnych, gdzie zależy nam na maksymalizacji energii przy niewielkiej masie.
+
+**Gęstość Grawimetryczna**
+
+- Oznacza, ile energii dostępnej jest w baterii w odniesieniu do jej masy (Wh/kg).
+- Gęstość grawimetryczna informuje, jak efektywnie bateria magazynuje energię w stosunku do swojej wagi. Jest kluczowa dla aplikacji, gdzie ważna jest zarówno pojemność energetyczna, jak i lekkość, np. w samochodach elektrycznych czy dronach.
+
+```{r, echo=FALSE}
+summary_gravimetric_energy_working_ion <- data %>%
+  group_by(Working.Ion) %>%
+  summarise(gravimetric_energy_mean = mean(Gravimetric.Energy),
+            gravimetric_energy_median = median(Gravimetric.Energy),,
+            gravimetric_energy_min = min(Gravimetric.Energy),
+            gravimetric_energy_max = max(Gravimetric.Energy),
+            total = n()) %>%
+  arrange(desc(gravimetric_energy_median))
+
+summary_gravimetric_energy_working_ion
+
+plot_ly(summary_gravimetric_energy_working_ion, x = ~total, y = ~gravimetric_energy_median, type = 'scatter', mode = 'markers', text = ~paste(Working.Ion)) %>%
+  layout(title = "Gravimetric energy median for Working Ion")
+
+
+summary_gravimetric_capacity_working_ion <- data %>%
+  group_by(Working.Ion) %>%
+  summarise(gravimetric_capacity_mean = mean(Gravimetric.Capacity),
+            gravimetric_capacity_median = median(Gravimetric.Capacity),
+            gravimetric_capacity_min = min(Gravimetric.Capacity),
+            gravimetric_capacity_max = max(Gravimetric.Capacity),
+            total = n()) %>%
+  arrange(desc(gravimetric_capacity_median))
+
+summary_gravimetric_capacity_working_ion
+
+plot_ly(summary_gravimetric_capacity_working_ion, x = ~total, y = ~gravimetric_capacity_median, type = 'scatter', mode = 'markers', text = ~paste(Working.Ion)) %>%
+  layout(title = "Gravimetric capacity median for Working Ion")
+
+```
+
+Największą pojemnością grawimetryczną charaketeryzują się materiały Al, Y, Mg, Ca, Zn, a gęstością grawimetryczną Ca, Li, Y, Na, Mg.
+
+
+```{r}
+
+
+formula_charge_summary <- data %>%
+  group_by(Formula.Charge) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total))
+
+percentile_99 <- quantile(select(formula_charge_summary, total), probs = 0.99, na.rm = TRUE)
+formula_charge_values_99_percentile <- formula_charge_summary %>%
+  filter(total >= percentile_99)
+
+formula_charge_values_99_percentile
+
+
+summary_data <- data %>%
+  filter(Formula.Charge %in% formula_charge_values_99_percentile$Formula.Charge) %>%
+  group_by(Formula.Charge) %>%
+  summarise(total = n(),
+    stability_charge_mean = mean(Stability.Charge),
+            stability_charge_median = median(Stability.Charge),
+            stability_charge_min = min(Stability.Charge),
+            stability_charge_max = max(Stability.Charge)) %>%
+  arrange(desc(total))
+
+
+ggplot(summary_data, aes(x = total, y = stability_charge_mean)) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +  # Optional trend line
+  labs(
+    title = "Relation between Total and Stability Charge Mean",
+    x = "Total",
+    y = "Stability Charge Mean"
+  ) +
+  theme_minimal()
+```
+
 
 ```{r}
 # Perform ANOVA
@@ -205,4 +569,167 @@ anova_result <- aov(Volumetric.Energy ~ Battery.Formula, data = data)
 summary(anova_result)
 ```
 
+# Predykcja
+
+Jako zmienną celu obrano pojemnośc grawimetryczną. 
+
+//TODO delete
+```{r}
+library("caret")
+set.seed(23)
+
+dataset_to_train  <- select(data, -(Battery.ID:Formula.Discharge))
+
+if (is.factor(data$Stability.Charge)) {
+    # Optional: If it should be numeric in the first place
+    data$Stability.Charge <- as.numeric(as.character(data$Stability.Charge))
+}
+
+
+head(dataset_to_train)
+
+inTraining <- 
+    createDataPartition(
+        y = data$Stability.Charge,
+        p = .75,
+        list = FALSE)
+
+training <- dataset_to_train[ inTraining,]
+testing  <- dataset_to_train[-inTraining,]
+
+ctrl <- trainControl(
+    # powtórzona ocena krzyżowa
+    method = "repeatedcv",
+    # liczba podziałów
+    number = 2,
+    # liczba powtórzeń
+    repeats = 5)
+
+fit <- train(Stability.Charge ~ .,
+             data = training,
+             method = "rf",
+             trControl = ctrl,
+             # Paramter dla algorytmu uczącego
+             ntree = 10)
+
+fit
+```
+```{r}
+idx <- createDataPartition(data$Gravimetric.Capacity,p=0.7, list=F)
+d1 <- data.frame(gravimetricCapacity=data[idx,]$Gravimetric.Capacity)
+d2 <- data.frame(gravimetricCapacity=data[-idx,]$Gravimetric.Capacity)
+
+ggplot(mapping=aes(alpha=0.4)) + 
+ geom_density(aes(gravimetricCapacity, fill="red"), d1) + 
+ geom_density(aes(gravimetricCapacity, fill="blue"), d2) + 
+ theme_minimal()
+```
+
+Przygotowanie zbioru do trenowania
+
+Ze zbioru usunięto atrybuty: \
+- ID - nie ma wpływu na zmienną celu
+- Battery.Formula - bardzo dużo unikalnych wartości, więcej niż połowa rozmiaru zbioru, istnieje ryzyko przeuczenia i nadmiernej segmentacji
+- Formula.Charge - podobnie jak  Battery.Formula - bardzo dużo unikalnych wartości
+- Formula.Discharge - podobnie jak wyżej
+
+Skalowanie i normalizacja zmiennych
+
+```{r}
+#dataset_train_selected_attr  <- select(data, -c(Battery.ID, Battery.Formula, Formula.Charge, Formula.Discharge))
+dataset_numerical_attrs <- select(data, numerical_attrs)
+preProc <- preProcess(dataset_numerical_attrs, method = c("center", "scale"))
+data_scaled <- predict(preProc, newdata = dataset_numerical_attrs)
+data_scaled$Working.Ion <- data$Working.Ion
+data_scaled
+```
+
+
+```{r}
+skim(data_scaled)
+```
+
+
+```{r}
+dummies <- dummyVars("~ .", data = data_scaled)
+data_transformed <- data.frame(predict(dummies, newdata = data_scaled))
+
+head(data_transformed)
+```
+
+```{r}
+anova_result <- aov(Gravimetric.Capacity ~ Battery.Formula, data = data)
+summary(anova_result)
+```
+
+Usunięcie zmiennych skorelowanych
+
+```{r}
+# Usunięcie zmiennych skorelowanych
+cor_matrix <- cor(data_transformed)
+high_corr <- findCorrelation(cor_matrix, cutoff = 0.9)
+data_reduced <- data_transformed[, -high_corr]
+colnames(data_reduced[high_corr])
+```
+
+```{r}
+
+targetAttr <- "Volumetric.Energy"
+target <- data_reduced$Volumetric.Energy
+predictors <- data_reduced[, -which(names(data_reduced) == targetAttr)]
+```
+
+```{r}
+data_reduced
+```
+
+```{r}
+# Podział danych
+set.seed(123)
+trainIndex <- createDataPartition(target, p = 0.7, list = FALSE)
+trainData <- data_reduced[trainIndex, ]
+testData <- data_reduced[-trainIndex, ]
+```
+
+```{r}
+ggplot() +
+  geom_density(data = trainData, aes(x = !!sym(targetAttr), fill = "Train"), alpha = 0.3) +
+  geom_density(data = testData, aes(x = !!sym(targetAttr), fill = "Test"), alpha = 0.3) +
+  scale_fill_manual(values = c("Train" = "red", "Test" = "blue")) +
+  theme_minimal() +
+  labs(title = "Porównanie rozkładu zmiennej celu w zbiorach treningowym i testowym",
+       x = targetAttr,
+       y = "Gęstość",
+       fill = "Zbiór")
+```
+
+
+```{r}
+targetAttr <- "Volumetric.Energy"
+formula <- as.formula(paste(targetAttr, "~ ."))
+
+model <- train(
+  formula, 
+  data = trainData, 
+  method = "lm", 
+  trControl = trainControl(method = "cv", number = 10)
+)
+```
+
+
+```{r}
+# Prognozy i ocena modelu
+predictions <- predict(model, newdata = testData)
+postResample(predictions, testData[[targetAttr]])
+```
+
+
+```{r}
+# Wykres rzeczywistych vs przewidywanych wartości
+plot(testData[[targetAttr]], predictions, 
+     main = paste("Predicted vs Actual", targetAttr),
+     xlab = "Rzeczywiste", ylab = "Przewidywane")
+abline(0, 1, col = "red")
+
+```
 
