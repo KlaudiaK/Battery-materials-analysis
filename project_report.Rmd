@@ -9,13 +9,19 @@ output:
     toc_float: true
     link-citations: true
 bibliography: "references.bib"
+nocite: '@*'
+lang: pl
 editor_options: 
   chunk_output_type: inline
 ---
 
 
 # Wstęp
-Celem analizy było zbadanie właściwości materiałów wykorzystywanych w tworzeniu baterii.
+Celem projektu była analiza zbioru danych dotyczącego materiałów wykorzystywanych w bateriach, z wykorzystaniem języka R. Dane te pochodzą z bazy Materials Project – inicjatywy Departamentu Energii USA, która dostarcza otwarte zasoby do badania właściwości i zastosowań materiałów.
+
+Zbiór ten zawiera szczegółowe informacje o składzie chemicznym i parametrach wydajnościowych materiałów stosowanych w bateriach. Analiza pozwala lepiej zrozumieć ich właściwości, co wspiera rozwój innowacyjnych technologii magazynowania energii. Raport przedstawia wyniki przeprowadzonych badań oraz kluczowe wnioski.
+
+
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, out.width = "100%")
@@ -23,14 +29,6 @@ set.seed(1108)
 ```
 
 ## Wykorzystane biblioteki
-
-- **skimr** - Umożliwia szybkie i przejrzyste generowanie statystyk opisowych dla zbiorów danych, dostarczając podsumowania dostosowane do różnych typów zmiennych. 
-- **corrplot** - Służy do wizualizacji macierzy korelacji. 
-- **GGally** - Rozszerza możliwości ggplot2, umożliwiając tworzenie zaawansowanych wizualizacji, takich jak macierze par wykresów czy korelogramy, co jest przydatne w analizie wielowymiarowej. 
-- **dplyr** - Zapewnia zestaw funkcji do manipulacji danymi w sposób deklaratywny i czytelny, umożliwiając filtrowanie, sortowanie, grupowanie oraz agregowanie danych w ramach złożonych operacji. 
-- **plotly** - Pozwala na tworzenie interaktywnych wykresów. 
-- **caret** - Ułatwia proces budowy modeli predykcyjnych, oferując narzędzia do przygotowania danych, selekcji cech, tuningu hiperparametrów oraz oceny modeli w spójny i zintegrowany sposób.
-
 
 ```{r results='hide', echo=TRUE}
 library(skimr)
@@ -50,15 +48,17 @@ library(gridExtra)
 library(here)
 library(tidyverse)
 library(scales)
+library(patchwork)
+library(Metrics)
+library(broom)
+library(randomForest)
 ```
 
 ## Jak wyglądają dane?
 
 ```{r load data, cache = TRUE, results=FALSE}
-#urlfile="https://raw.githubusercontent.com/KlaudiaK/Battery-materials-analysis/refs/heads/master/mp_batteries.csv"
-#data <- read.csv(url(urlfile))
-
-data <- read.csv("D:\\studia\\magisterka\\ZED\\Projekt_R\\mp_batteries.csv")
+urlfile="https://raw.githubusercontent.com/KlaudiaK/Battery-materials-analysis/refs/heads/master/mp_batteries.csv"
+data <- read.csv(url(urlfile))
 
 data$Steps <- as.factor(data$Steps)
 data$Working.Ion <- as.factor(data$Working.Ion)
@@ -127,6 +127,11 @@ Zbiór zawiera: \
 - kolumny numeryczne: `r num_numeric`,\
 - kolumny logiczne: `r num_logical` \
 
+```{r}
+skim_summary
+```
+
+
 ```{r numerical-attributes, echo=FALSE}
 numerical_attrs <- data %>% select_if(is.numeric) %>% colnames
 ```
@@ -146,73 +151,19 @@ W tej części zostanie przeprowadzona analiza wartości atrybutów w zbiorze da
 
 ### Atrybuty numeryczne
 
-Sekcja obejmuje wizualizację rozkładów wartości dla atrybutów numerycznych. Po lewej stronie znajduje się histogram, który ilustruje częstość występowania różnych wartości atrybutu przyporządkowanych do określonej liczby przedziałów. 
+Sekcja obejmuje wizualizację rozkładów wartości dla atrybutów numerycznych. Na górze znajduje się histogram, który ilustruje częstość występowania różnych wartości atrybutu przyporządkowanych do określonej liczby przedziałów. 
 Pomarańczowy kolor reprezentuje linię gęstości rozkładu (tzw. density plot). Wykres gęstości jest używany do wizualizacji kształtu rozkładu danych, pozwalając na lepsze zrozumienie jego formy w porównaniu do histogramu.
-Na wykresie znajduje się również czerwona linia pionowa, oznaczająca średnią wartość atrybutu, co pozwala na szybką ocenę jego centralnego położenia.\
-Po prawej stronie znajduje się wykres pudełkowy (tzw. boxplot), który wizualizuje rozproszenie wartości i pozwala na identyfikację wartości odstających.
+Na wykresie znajduje się również czerwona linia, oznaczająca średnią wartość atrybutu, oraz zółta oznaczająca medianę, co pozwala na szybką ocenę jego centralnego położenia.\
+na dole znajduje się wykres pudełkowy (tzw. boxplot), który wizualizuje rozproszenie wartości i pozwala na identyfikację wartości odstających.
 
-```{r data-histogram-boxplot, fig.width=14}
-plot_list <- list()
-
-for (attr_name in numerical_attrs) {
-  min_value <- min(data[[attr_name]], na.rm = TRUE)  
-  max_value <- max(data[[attr_name]], na.rm = TRUE)
-  mean_value <- mean(data[[attr_name]], na.rm = TRUE)
-  
-  p_histogram <- ggplot(data, aes_string(x = attr_name)) +
-    geom_histogram(aes(y = ..density..),
-                   binwidth = (max_value - min_value) / 30,
-                   fill = "darkblue", 
-                   color = "black", 
-                   alpha = 0.3) +
-    geom_density(color = "darkorange", size = 2) +
-    geom_vline(aes(xintercept = mean_value), color = "red", linetype = "dashed", size = 1) +
-    labs(title = paste("Histogram dla", attr_name),
-         x = attr_name,
-         y = "Liczba obserwacji") +
-  scale_x_continuous(limits = c(min_value - 1, max_value)) +
-  theme_minimal() +
-  theme(
-     plot.title = element_text(size = 20)
-  )
-  
-  
-  p_boxplot <- ggplot(data, aes_string(y = attr_name)) +
-    geom_boxplot(
-      fill = "purple", 
-      color = "black", 
-      outlier.size = 2, 
-      outlier.colour = "red",
-      outlier.shape = 16
-    ) +
-    labs(title = paste("Wykres pudełkowy dla", attr_name),
-         y = attr_name) +
-    theme_minimal() +
-    theme(
-     plot.title = element_text(size = 20),
-    plot.margin = margin(t = 20, r = 20, b = 20, l = 20)
-    )
-    
-  
-  grid_plot <- grid.arrange(p_histogram, p_boxplot)
-  
-  plot_list[[attr_name]] <- grid_plot
-}
-
-```
 ```{r}
-library(ggplot2)
-library(patchwork)
-library(dplyr)
 
 for (attr_name in numerical_attrs) {
-  # Check if the column is numeric
   if (is.numeric(data[[attr_name]])) {
-    # Create the histogram plot
     hist_plt <- data %>% 
       ggplot(mapping = aes_string(x = attr_name)) + 
-      geom_histogram(bins = 100, fill = "midnightblue", alpha = 0.7) +
-       geom_density(color = "darkorange", size = 2) +
+      geom_histogram(aes(y = ..density..), bins = 100, fill = "midnightblue", alpha = 0.7) +
+      geom_density(color = "darkorange", size = 1) +
       # Add lines for mean and median
       geom_vline(aes(xintercept = mean(get(attr_name), na.rm = TRUE), color = 'Mean'), linetype = "dashed", size = 1.3) +
       geom_vline(aes(xintercept = median(get(attr_name), na.rm = TRUE), color = 'Median'), linetype = "dashed", size = 1.3) +
@@ -236,6 +187,7 @@ for (attr_name in numerical_attrs) {
     
     # Print the combined plot
     print(combined_plot)
+    grid::grid.lines(x = c(0, 1), y = c(0, 0), gp = grid::gpar(col = "black", lty = 2))
   } else {
     message(paste(attr_name, "is not numeric and will be skipped."))
   }
@@ -245,10 +197,26 @@ for (attr_name in numerical_attrs) {
 ```
 
 
-Większość rozkładów jest prawoskośna, co oznacza, że większość większość wartości jest mniejszych niż średnia. 
+Analizując rozkłady zmiennych, można zauważyć kilka kluczowych tendencji. Większość zmiennych charakteryzuje się silnie skośnymi rozkładami z dużą koncentracją wartości blisko zera oraz ogonami wydłużającymi się w kierunku wartości maksymalnych. Takie rozkłady sugerują istnienie znaczącej liczby obserwacji z niskimi wartościami oraz nieliczne przypadki ekstremalnych wyników.
 
-- Max Delta Volume - Dane są wyraźnie skupiene przy zerze, obecne są nieliczne przypadki odstające.
-- Max Voltage Step - Dane są wyraźnie skupiene przy zerze, co sugeruje, że większość danych przyjmuje wartości bliskie zeru. Obecne są nieliczne przypadki odstające.
+Na histogramach można zauważyć wyraźne piki dla wartości centralnych w niektórych przypadkach, a linie gęstości pomagają uwidocznić kształt tych rozkładów. Średnia (czerwona linia przerywana) i mediana (żółta linia przerywana) często znajdują się bardzo blisko siebie, co wskazuje na umiarkowaną symetrię w części zmiennych. Niemniej jednak, w przypadku niektórych zmiennych, takich jak „Gravimetric.Capacity” czy „Volumetric.Capacity”, różnica między średnią a medianą sugeruje wpływ wartości skrajnych na rozkład.
+
+Wykresy pudełkowe uzupełniają analizę, uwidaczniając obecność licznych wartości odstających w większości zmiennych. Obserwacje odstające są szczególnie widoczne dla zmiennych takich jak „Gravimetric.Energy” czy „Volumetric.Energy”.
+
+Dla poszczególnych atrybutów można wyciągnąć wnioski, że większość wartości koncentruje się w zakresie:
+
+- Max.Delta.Volume - **blisko 0**, nieliczne wartości odstające i extremalne
+- Average.Voltage -  **2 - 4**, rozkład jest asymetryczny ze względu na dużą liczbę wartości odstających
+- Gravimetric.Capacity - **88 - 200**, liczne wartości odstające, rozkład z długin ogonem po prawej stronie 
+- Volumetric Capacity - **310 - 720**, rozkład z dwoma dominantami
+- Gravimetric Energy - **210 - 615**, rozkład z długin ogonem po prawej stronie
+- Volumetric Energy -  **820 - 2250**, rozkład z długin ogonem po prawej stronie
+- Atomic Fraction Charge - **0 - 0.05**, średnia mocno przesunięta na prawo od mediany, co może być spowodowane licznymi przypadkami odstającymi
+- Atomic Fraction Discharge - **0.086 - 0.2**
+- Stability.Charge - koncentracja w zakresie **0.03 - 0.13**, liczne wartości odstające, rozkład asymetryczny z długim ogonem po prawej stronie
+- Stability.Discharge - koncentracja w zakresie **0.02 - 0.09**, liczne wartości odstające, rozkład asymetryczny z długim ogonem po prawej stronie
+- Max Voltage Step - silna koncentracja wartości **blisko 0**
+
 
 ### Główne jony
 
@@ -285,7 +253,7 @@ Pozostałe jony, takie jak wapń (Ca), magnez (Mg), i cynk (Zn), również znajd
 Poniżej znajdują się interkatywne wykresy pudełkowe dla każdej zmiennej numerycznej w zbiorze danych z podziałem na główne jony. Wykresy te umożliwiają eksplorację rozkładu wartości, identyfikację potencjalnych wartości odstających oraz porównanie zmienności w każdej zmiennej dla poszególnych jonów.
 
 ```{r interactive_boxplots, results='hide', fig.keep = 'none', fig.width=14}
-for (attr_name in names(number_attr_data)) {
+for (attr_name in numerical_attrs) {
   p <- plot_ly(
     data, 
     y = ~get(attr_name),
@@ -307,6 +275,14 @@ for (attr_name in names(number_attr_data)) {
 }
 
 ```
+
+Wnioski z analizy wykresów rozkładów wartości wybranych atrybutów z podziałem na główny jon:
+
+- Dla średniego napięcia lit charakteryzuje się najwęższym przedziałem najczęstszych wartości, ale jednocześnie jest jonem, dla którego można zidentyfikować najwięcej wartości odstających.
+- W przypadku pojemności grawimetrycznej jonami, które charakteryzują się największą liczbą silnie odstających obserwacji są magnez (Mg) i glin (Al).
+- Na tla wszystkich cech, cez wykazuje największe skupienie wartości, w porównaniu do innych jonów posiada najmniej wartości odstających.
+- Najwięcej wartości silnie odstających można przypisać litowi, magnezowi, i glinowi. Liczne wartości odstające w przypadku litu mogą być spowowodwane dominacją w wykorzystaniu nad innymi jonami.
+- Warto zauważyć, że lit, najczęściej wykorzystywany jako jon główny, w większości cech charakteryzuje się równomiernym rozkładem, co może być istotnym czynnikiem decydującym o jego dominacji.  
 
 ### Wzory chemiczne materiału baterii
 
@@ -366,163 +342,6 @@ formula_discharge_values_99_percentile %>%
 ```
 
 Wykres przedstawia liczbę wystąpień różnych wzorów chemicznych materiałów baterii w stanie rozładowanym. W zbiorze jest `r length(unique(data$Formula.Discharge))` różnych wzorów chemicznych materiałów baterii w stanie rozładowanym. Najczęściej występujące wzory to LiVOF11, Li2O5F5, LiFePO4, LiCoPO4. Znaczna większość najczęściej występujących wzorów zawiera cząsteczkę litu.
-
-
-## Korelacja zmiennych
-
-Poniższa macierz korelacji ilustruje współczynniki korelacji Pearsona dla wybranych atrybutów. Kolory kafelków reprezentują siłę oraz kierunek korelacji. Odcienie niebieskiego wskazują na dodatnią korelację, a odcienie czerwonego na ujemną.
-
-```{r coorelation-matrix, echo=FALSE,  fig.width=16, fig.height=8}
-number_attr_data <- select(data, (Max.Delta.Volume:Max.Voltage.Step))
-
-cor_matrix <- cor(number_attr_data, method = "pearson")
-
-corrplot.mixed(cor_matrix,
-  tl.pos = 'lt',
-  order = 'AOE',
-  lower = 'shade',
-  upper = 'number'
-)
-```
-
-**Najwyższy wspolczynnik korelacji** wystepuje pomiedzy parami atrybutów:\
-- **Gravimetric Energy i Volumetric Energy** - 0.93 \
-- **Gravimetric Capcity i Volumetric Capacity** - 0.86 \
-- **Stability Charge i Stability Discharge** - 0.80 \
-- Gravimetric Capacity i Atomic Fraction Discharge - 0.68 \
-- Average Voltage i Gravimetric Energy - 0.67
-
-### Korelacja pomiędzy energią grawimetryczną i wolumetryczną
-
-```{r }
-gravimetric_volumetric_energy_correlation <- cor(data$Gravimetric.Energy, data$Volumetric.Energy, use = "complete.obs")
-
-ggplot(data, aes(x = Gravimetric.Energy, y = Volumetric.Energy)) +
-  geom_point(color = "darkgreen", size = 2, alpha = 0.7) +
-  geom_smooth(method = "lm", color = "blue", se = FALSE, linetype = "dashed") +
-  geom_smooth(method = "loess", color = "red", se = TRUE, fill = "gray80") +
-  labs(title = "Korelacja między grawimetryczną i wolumetryczną gęstością energii",
-       subtitle = paste("Współczynnik korelacji =", round(gravimetric_volumetric_energy_correlation, 2)),
-       x = "Grawimetryczna gęstość energii (Wh/kg)",
-       y = "Wolumetryczna gęstość energii (Wh/L)") +
-  theme_minimal()
-```
-Wykres przedstawia **zależność między gęstością energii wolumetryczną** (Wh/L, energia na jednostkę objętości) **a grawimetryczną** (Wh/kg, energia na jednostkę masy), gdzie widoczna jest **silna korelacja** dodatnia między tymi parametrami. Gęstość energii jest **kluczowym wskaźnikiem wydajności baterii** - im wyższa wartość, tym więcej energii może być zmagazynowane w danej objętości lub masie baterii, co jest szczególnie istotne w zastosowaniach mobilnych, takich jak pojazdy elektryczne czy urządzenia przenośne. **Większość badanych materiałów skupia się w zakresie do 2000 Wh/kg i 7500 Wh/L**, choć występuje kilka obiecujących wyjątków o wyższych parametrach, które mogą stanowić potencjalne kierunki rozwoju nowych, wydajniejszych baterii.
-
-
-### Korelacja pomiędzy pojemnością grawimetryczną i wolumetryczną
-
-```{r}
-gravimetric_volumetric_capacity_correlation <- cor(data$Gravimetric.Capacity, data$Volumetric.Capacity, use = "complete.obs")
-
-ggplot(data, aes(x = Gravimetric.Capacity, y = Volumetric.Capacity)) +
-  geom_point(color = "darkgreen", size = 2, alpha = 0.7) +
-  geom_smooth(method = "lm", color = "blue", se = FALSE) +
-  geom_smooth(method = "loess", color = "red", se = TRUE, fill = "gray80") +
-  labs(title = "Korelacja między grawimetryczną i wolumetryczną pojemnością ",
-       subtitle = paste("Correlation =", round(gravimetric_volumetric_capacity_correlation, 2)),
-       x = "Pojemność grawimetryczna (mAh/g)",
-       y = "Pojemność wolumetryczna (mAh/cm³)") +
-  theme_minimal()
-
-```
-
-Wykres przedstawia **zależność między pojemnością wolumetryczną** (mAh/cm³, ilość ładunku na jednostkę objętości) **a grawimetryczną** (mAh/g, ilość ładunku na jednostkę masy) materiałów, gdzie pojemność grawimetryczna określa ile energii można zmagazynować w danej masie materiału, a wolumetryczna - ile w danej objętości, co ma kluczowe znaczenie przy projektowaniu baterii o różnym przeznaczeniu. **Współczynnik korelacji 0.86 wskazuje na silną zależność między tymi parametrami**, choć nie tak silną jak w przypadku gęstości energii. Na przykład, materiał o wysokiej pojemności grawimetrycznej może być lekki, ale zajmować dużo miejsca, podczas gdy materiał o wysokiej pojemności wolumetrycznej może być cięższy, ale bardziej kompaktowy [@ogniwa-litowo-jonowe].
-
-
-### Korelacja pomiędzy stabilnością materiału w stanie naładowanym i rozładowanym
-
-```{r}
-stability_charge_discharge_coorelation <- cor(data$Stability.Charge, data$Stability.Discharge, use = "complete.obs")
-
-ggplot(data, aes(x = Stability.Charge, y = Stability.Discharge)) +
-  geom_point(color = "darkgreen", size = 2, alpha = 0.7) +
-  geom_smooth(method = "lm", color = "blue", se = FALSE, linetype = "dashed") +
-  geom_smooth(method = "loess", color = "red", se = TRUE, fill = "gray80") +
-  labs(title = "Stability Charge vs Stability Discharge",
-       subtitle = paste("Correlation =", round(stability_charge_discharge_coorelation, 2)),
-       x = "Stability Charge",
-       y = "Stability Discharge") +
-  theme_minimal()
-
-```
-
-Wykres przedstawia **zależność między stabilnością materiału w stanie naładowanym** (Stability Charge) **a stabilnością w stanie rozładowanym** (Stability Discharge), ze współczynnikiem korelacji 0.8 wskazującym na silną dodatnią zależność. Stabilność materiału jest **kluczowym parametrem określającym, jak dobrze materiał zachowuje swoją strukturę i właściwości podczas cykli ładowania i rozładowania** - im niższa wartość, tym materiał jest bardziej stabilny i bezpieczny w użytkowaniu. Większość badanych materiałów skupia się w zakresie niskich wartości (0-2) dla obu parametrów, co jest pożądane, natomiast punkty odstające o wyższych wartościach (powyżej 4) mogą wskazywać na materiały problematyczne, które mogą być mniej odpowiednie do zastosowań w bateriach ze względu na potencjalną niestabilność.
-
-### Korelacja pomiędzy pojemnością grawimetryczną i udział atomowym składników w stanie rozładowanym
-
-```{r coorelation-gravimetric-capacity-atomic-graction-discharge}
-gravimetric_capacity_atomic_fraction_discharge_coorelation <- cor(data$Gravimetric.Capacity, data$Atomic.Fraction.Discharge, use = "complete.obs")
-
-ggplot(data, aes(x = Gravimetric.Capacity, y = Atomic.Fraction.Discharge)) +
-  geom_point(aes(color = Atomic.Fraction.Discharge), size = 3, alpha = 0.7) +
-  geom_smooth(method = "loess", color = "red", se = TRUE, fill = "gray80") +
-  labs(title = "Korelacja między pojemnnością grawimetryczną a udział atomowym składników w stanie rozładowanym",
-       subtitle = paste("Correlation =", round(gravimetric_capacity_atomic_fraction_discharge_coorelation, 2)),
-       x = "Pojemność grawimetryczna (mAh/g)",
-       y = "Udział atomowy składników w stanie rozładowanym.") +
-  scale_color_gradient(low = "orange", high = "purple") +
-  theme_minimal()
-
-```
-
-Wykres przedstawia **zależność między pojemnością grawimetryczną** (Gravimetric Capacity, mAh/g) **a udziałem atomowym w stanie rozładowania** (Atomic Fraction Discharge). Można zaobserwować umiarkowanie silną dodatnią zależność, co potwierdza współczynnik korelacji wynoszący 0.68. W miarę wzrostu pojemności grawimetrycznej, udział atomowy w stanie rozładowania zwiększa się, osiągając wartość maksymalną bliską 1.0. \
-Kolor punktów reprezentuje wartość Atomic Fraction Discharge, gdzie jaśniejsze kolory wskazują na niższe wartości, a ciemniejsze na wyższe. Dane wskazują, że większość obserwacji znajduje się w zakresie niskiej pojemności grawimetrycznej (<1000 mAh/g), a dla wartości powyżej 2000 mAh/g zależność staje się nieliniowa. Sugeruje to, że materiały o wyższej pojemności grawimetrycznej mają tendencję do osiągania wyższych udziałów atomowych w stanie rozładowania.
-
-### Korelacja pomiędzy średnim napięciem a energią grawimetryczną
-
-```{r}
-filteredData <- data %>%filter(data$Steps == 3)
-correlation <- cor(data$Average.Voltage, data$Gravimetric.Energy, use = "complete.obs")
-
-ggplot(data, aes(x = Average.Voltage, y = Gravimetric.Energy)) +
-  geom_point(color = "darkblue", size = 3, alpha = 0.7) +
-  geom_smooth(method = "lm", color = "darkred", se = FALSE, linetype = "dashed") +
-  labs(title = "Average Voltage vs Gravimetric Energy",
-       subtitle = paste("Correlation =", round(correlation, 2)),
-       x = "Average Voltage (V)",
-       y = "Gravimetric Energy Density (Wh/kg)") +
-  theme_classic()
-
-```
-
-
-```{r average-voltage-gravimetric-energy-by-step, echo=FALSE, fig.width=12, fig.height=10}
-
-data_with_cor <- data %>%
-  group_by(Steps) %>%
-  summarise(
-    correlation = cor(Average.Voltage, Gravimetric.Energy, use = "complete.obs"),
-    n_cases = n() 
-  )
-
-p <- ggplot(data, aes(x = Average.Voltage, y = Gravimetric.Energy)) +
-   geom_point(aes(text = paste("Step:", Steps, 
-                              "<br>Voltage:", Average.Voltage, 
-                              "<br>Energy:", Gravimetric.Energy, 
-                              "<br>Ion:", Working.Ion)), 
-             color = "darkblue", size = 3, alpha = 0.7) +
-  geom_smooth(method = "lm", color = "darkred", se = FALSE, linetype = "dashed") +
-  facet_wrap(~ Steps, scales = "free",   ncol = 2, 
-             labeller = labeller(Steps = function(x) {
-              row <- data_with_cor[data_with_cor$Steps == x, ]
-              paste0("Step = ", x, " (Corr = ", round(row$correlation, 2), 
-                      ", n = ", row$n_cases, ")")
-             })) +
-   labs(title = "Średnie napięcie a Energia grawimetryczna przy uwzględnieniu wartości kroku",
-       x = "Average Voltage (V)",
-       y = "Gravimetric Energy Density (Wh/kg)")  +
-  theme_grey() +
-   theme(
-    plot.title = element_text(margin = margin(b = 20)),
-    plot.margin = margin(t = 20, r = 20, b = 20, l = 20)
-  )
-
-ggplotly(p,  tooltip = "text")
-```
-
-Wykresy przedstawiają zależności między średnim napięciem (Average Voltage, V) a gęstością energii grawimetrycznej (Gravimetric Energy Density, Wh/kg) dla różnych wartości kroku napięcia.
-Dane wskazują, że wraz ze wzrostem średniego napięcia zwiększa się gęstość energii grawimetrycznej. Większość danych skupia się w zakresie niskich wartości napięcia (<10 V), co sugeruje, że materiały o wyższym napięciu są mniej liczne, ale wykazują większą efektywność energetyczną.
 
 
 ## Analiza właściwości
@@ -625,7 +444,7 @@ summary_max_data_volume_working_ion <- data %>%
             total = n()) %>%
   arrange(max_data_volume_mean)
 
-kable(summary_max_data_volume_working_ion)
+prettyTable(summary_max_data_volume_working_ion)
 
 p <- ggplot(summary_max_data_volume_working_ion, aes(x = total, y = max_data_volume_median, color = Working.Ion)) +
   geom_point(aes(
@@ -669,7 +488,7 @@ summary_gravimetric_energy_working_ion <- data %>%
             total = n()) %>%
   arrange(desc(gravimetric_energy_median))
 
-kable(summary_gravimetric_energy_working_ion)
+prettyTable(summary_gravimetric_energy_working_ion)
 
 p <- ggplot(summary_gravimetric_energy_working_ion, aes(x = total, y = gravimetric_energy_median, color = Working.Ion)) +
   geom_point(aes(
@@ -794,218 +613,197 @@ ggplotly(p, tooltip = "text")
 
 ```
 
+## Korelacja zmiennych
+
+Poniższa macierz korelacji ilustruje współczynniki korelacji Pearsona dla wybranych atrybutów. Kolory kafelków reprezentują siłę oraz kierunek korelacji. Odcienie niebieskiego wskazują na dodatnią korelację, a odcienie czerwonego na ujemną.
+
+```{r coorelation-matrix, echo=FALSE,  fig.width=16, fig.height=8}
+number_attr_data <- select(data, (numerical_attrs))
+
+cor_matrix <- cor(number_attr_data, method = "pearson")
+
+corrplot.mixed(cor_matrix,
+  tl.pos = 'lt',
+  order = 'AOE',
+  lower = 'shade',
+  upper = 'number'
+)
+```
+**Najwyższy wspolczynnik korelacji** wystepuje pomiedzy parami atrybutów:\
+- **Gravimetric Energy i Volumetric Energy** - 0.93 \
+- **Gravimetric Capcity i Volumetric Capacity** - 0.86 \
+- **Stability Charge i Stability Discharge** - 0.80 \
+- Gravimetric Capacity i Atomic Fraction Discharge - 0.68 \
+- Average Voltage i Gravimetric Energy - 0.67
+
+### Korelacja pomiędzy energią grawimetryczną i wolumetryczną
+
+```{r }
+gravimetric_volumetric_energy_correlation <- cor(data$Gravimetric.Energy, data$Volumetric.Energy, use = "complete.obs")
+
+ggplot(data, aes(x = Gravimetric.Energy, y = Volumetric.Energy)) +
+  geom_point(color = "darkgreen", size = 2, alpha = 0.7) +
+  geom_smooth(method = "lm", color = "blue", se = FALSE, linetype = "dashed") +
+  geom_smooth(method = "loess", color = "red", se = TRUE, fill = "gray80") +
+  labs(title = "Korelacja między grawimetryczną i wolumetryczną gęstością energii",
+       subtitle = paste("Współczynnik korelacji =", round(gravimetric_volumetric_energy_correlation, 2)),
+       x = "Grawimetryczna gęstość energii (Wh/kg)",
+       y = "Wolumetryczna gęstość energii (Wh/L)") +
+  theme_minimal()
+```
+
+
+Wykres przedstawia **zależność między gęstością energii wolumetryczną** (Wh/L, energia na jednostkę objętości) **a grawimetryczną** (Wh/kg, energia na jednostkę masy), gdzie widoczna jest **silna korelacja** dodatnia między tymi parametrami. Gęstość energii jest **kluczowym wskaźnikiem wydajności baterii** - im wyższa wartość, tym więcej energii może być zmagazynowane w danej objętości lub masie baterii, co jest szczególnie istotne w zastosowaniach mobilnych, takich jak pojazdy elektryczne czy urządzenia przenośne. **Większość badanych materiałów skupia się w zakresie do 2000 Wh/kg i 7500 Wh/L**, choć występuje kilka obiecujących wyjątków o wyższych parametrach, które mogą stanowić potencjalne kierunki rozwoju nowych, wydajniejszych baterii.
+
+### Korelacja pomiędzy pojemnością grawimetryczną i wolumetryczną
+
+```{r}
+gravimetric_volumetric_capacity_correlation <- cor(data$Gravimetric.Capacity, data$Volumetric.Capacity, use = "complete.obs")
+
+ggplot(data, aes(x = Gravimetric.Capacity, y = Volumetric.Capacity)) +
+  geom_point(color = "darkgreen", size = 2, alpha = 0.7) +
+  geom_smooth(method = "lm", color = "blue", se = FALSE) +
+  geom_smooth(method = "loess", color = "red", se = TRUE, fill = "gray80") +
+  labs(title = "Korelacja między grawimetryczną i wolumetryczną pojemnością ",
+       subtitle = paste("Correlation =", round(gravimetric_volumetric_capacity_correlation, 2)),
+       x = "Pojemność grawimetryczna (mAh/g)",
+       y = "Pojemność wolumetryczna (mAh/cm³)") +
+  theme_minimal()
+
+```
+
+
+Wykres przedstawia **zależność między pojemnością wolumetryczną** (mAh/cm³, ilość ładunku na jednostkę objętości) **a grawimetryczną** (mAh/g, ilość ładunku na jednostkę masy) materiałów, gdzie pojemność grawimetryczna określa ile energii można zmagazynować w danej masie materiału, a wolumetryczna - ile w danej objętości, co ma kluczowe znaczenie przy projektowaniu baterii o różnym przeznaczeniu. **Współczynnik korelacji 0.86 wskazuje na silną zależność między tymi parametrami**, choć nie tak silną jak w przypadku gęstości energii. Na przykład, materiał o wysokiej pojemności grawimetrycznej może być lekki, ale zajmować dużo miejsca, podczas gdy materiał o wysokiej pojemności wolumetrycznej może być cięższy, ale bardziej kompaktowy [@ogniwa-litowo-jonowe].
+
+
+### Korelacja pomiędzy stabilnością materiału w stanie naładowanym i rozładowanym
+
+```{r}
+stability_charge_discharge_coorelation <- cor(data$Stability.Charge, data$Stability.Discharge, use = "complete.obs")
+
+ggplot(data, aes(x = Stability.Charge, y = Stability.Discharge)) +
+  geom_point(color = "darkgreen", size = 2, alpha = 0.7) +
+  geom_smooth(method = "lm", color = "blue", se = FALSE, linetype = "dashed") +
+  geom_smooth(method = "loess", color = "red", se = TRUE, fill = "gray80") +
+  labs(title = "Stability Charge vs Stability Discharge",
+       subtitle = paste("Correlation =", round(stability_charge_discharge_coorelation, 2)),
+       x = "Stability Charge",
+       y = "Stability Discharge") +
+  theme_minimal()
+
+```
+
+
+Wykres przedstawia **zależność między stabilnością materiału w stanie naładowanym** (Stability Charge) **a stabilnością w stanie rozładowanym** (Stability Discharge), ze współczynnikiem korelacji 0.8 wskazującym na silną dodatnią zależność. Stabilność materiału jest **kluczowym parametrem określającym, jak dobrze materiał zachowuje swoją strukturę i właściwości podczas cykli ładowania i rozładowania** - im niższa wartość, tym materiał jest bardziej stabilny i bezpieczny w użytkowaniu. Większość badanych materiałów skupia się w zakresie niskich wartości (0-2) dla obu parametrów, co jest pożądane, natomiast punkty odstające o wyższych wartościach (powyżej 4) mogą wskazywać na materiały problematyczne, które mogą być mniej odpowiednie do zastosowań w bateriach ze względu na potencjalną niestabilność.
+
+### Korelacja pomiędzy pojemnością grawimetryczną i udział atomowym składników w stanie rozładowanym
+
+```{r coorelation-gravimetric-capacity-atomic-graction-discharge}
+gravimetric_capacity_atomic_fraction_discharge_coorelation <- cor(data$Gravimetric.Capacity, data$Atomic.Fraction.Discharge, use = "complete.obs")
+
+ggplot(data, aes(x = Gravimetric.Capacity, y = Atomic.Fraction.Discharge)) +
+  geom_point(aes(color = Atomic.Fraction.Discharge), size = 3, alpha = 0.7) +
+  geom_smooth(method = "loess", color = "red", se = TRUE, fill = "gray80") +
+  labs(title = "Korelacja między pojemnnością grawimetryczną a udział atomowym składników w stanie rozładowanym",
+       subtitle = paste("Correlation =", round(gravimetric_capacity_atomic_fraction_discharge_coorelation, 2)),
+       x = "Pojemność grawimetryczna (mAh/g)",
+       y = "Udział atomowy składników w stanie rozładowanym.") +
+  scale_color_gradient(low = "orange", high = "purple") +
+  theme_minimal()
+
+```
+
+
+Wykres przedstawia **zależność między pojemnością grawimetryczną** (Gravimetric Capacity, mAh/g) **a udziałem atomowym w stanie rozładowania** (Atomic Fraction Discharge). Można zaobserwować umiarkowanie silną dodatnią zależność, co potwierdza współczynnik korelacji wynoszący 0.68. W miarę wzrostu pojemności grawimetrycznej, udział atomowy w stanie rozładowania zwiększa się, osiągając wartość maksymalną bliską 1.0. \
+Kolor punktów reprezentuje wartość Atomic Fraction Discharge, gdzie jaśniejsze kolory wskazują na niższe wartości, a ciemniejsze na wyższe. Dane wskazują, że większość obserwacji znajduje się w zakresie niskiej pojemności grawimetrycznej (<1000 mAh/g), a dla wartości powyżej 2000 mAh/g zależność staje się nieliniowa. Sugeruje to, że materiały o wyższej pojemności grawimetrycznej mają tendencję do osiągania wyższych udziałów atomowych w stanie rozładowania.
+
+### Korelacja pomiędzy średnim napięciem a energią grawimetryczną
+
+```{r}
+filteredData <- data %>%filter(data$Steps == 3)
+correlation <- cor(data$Average.Voltage, data$Gravimetric.Energy, use = "complete.obs")
+
+ggplot(data, aes(x = Average.Voltage, y = Gravimetric.Energy)) +
+  geom_point(color = "darkblue", size = 3, alpha = 0.7) +
+  geom_smooth(method = "lm", color = "darkred", se = FALSE, linetype = "dashed") +
+  labs(title = "Average Voltage vs Gravimetric Energy",
+       subtitle = paste("Correlation =", round(correlation, 2)),
+       x = "Average Voltage (V)",
+       y = "Gravimetric Energy Density (Wh/kg)") +
+  theme_classic()
+
+```
+
+
+```{r average-voltage-gravimetric-energy-by-step, echo=FALSE, fig.width=12, fig.height=10}
+
+data_with_cor <- data %>%
+  group_by(Steps) %>%
+  summarise(
+    correlation = cor(Average.Voltage, Gravimetric.Energy, use = "complete.obs"),
+    n_cases = n() 
+  )
+
+p <- ggplot(data, aes(x = Average.Voltage, y = Gravimetric.Energy)) +
+   geom_point(aes(text = paste("Step:", Steps, 
+                              "<br>Voltage:", Average.Voltage, 
+                              "<br>Energy:", Gravimetric.Energy, 
+                              "<br>Ion:", Working.Ion)), 
+             color = "darkblue", size = 3, alpha = 0.7) +
+  geom_smooth(method = "lm", color = "darkred", se = FALSE, linetype = "dashed") +
+  facet_wrap(~ Steps, scales = "fixed",   ncol = 2, 
+             labeller = labeller(Steps = function(x) {
+              row <- data_with_cor[data_with_cor$Steps == x, ]
+              paste0("Step = ", x, " (Corr = ", round(row$correlation, 2), 
+                      ", n = ", row$n_cases, ")")
+             })) +
+   labs(title = "Średnie napięcie a Energia grawimetryczna przy uwzględnieniu wartości kroku",
+       x = "Average Voltage (V)",
+       y = "Gravimetric Energy Density (Wh/kg)")  +
+  theme_grey() +
+ theme(
+    plot.title = element_text(margin = ggplot2::margin(t = 10, b = 10), hjust = 0.5), # Specify ggplot2::margin
+    axis.title.x = element_text(margin = ggplot2::margin(t = 10)),
+    axis.title.y = element_text(margin = ggplot2::margin(r = 10)),
+    plot.margin = ggplot2::margin(20, 20, 20, 20),
+    panel.spacing = unit(2, "cm")
+  )
+
+ggplotly(p,  tooltip = "text")
+```
+
+
+Wykresy przedstawiają zależności między średnim napięciem (Average Voltage, V) a gęstością energii grawimetrycznej (Gravimetric Energy Density, Wh/kg) dla różnych wartości kroku napięcia.
+Dane wskazują, że wraz ze wzrostem średniego napięcia zwiększa się gęstość energii grawimetrycznej. Większość danych skupia się w zakresie niskich wartości napięcia (<10 V), co sugeruje, że materiały o wyższym napięciu są mniej liczne, ale wykazują większą efektywność energetyczną.
+
 
 # Predykcja cech i właściwości baterii
 
-## Predykcja pojemności grawimetrycznej metodą regresji
+W tej sekcji zostaną przeanalizowane dwa modele predykcyjne dotyczące właściwości baterii. Pierwszy model, oparty na regresji liniowej, skupia się na przewidywaniu energii grawimetrycznej. Drugi model, wykorzystujący algorytm Random Forest, przewiduje średnie napięcie. W obu przypadkach celem jest ocena skuteczności zastosowanych metod oraz identyfikacja kluczowych czynników wpływających na wyniki.
 
-Jako zmienną celu obrano pojemność grawimetryczną. 
+## Predykcja energii grawimetrycznej metodą regresji
 
-//TODO delete
-```{r}
-library("caret")
-set.seed(23)
-
-dataset_to_train  <- select(data, -(Battery.ID:Formula.Discharge))
-
-if (is.factor(data$Stability.Charge)) {
-    # Optional: If it should be numeric in the first place
-    data$Stability.Charge <- as.numeric(as.character(data$Stability.Charge))
-}
-
-
-head(dataset_to_train)
-
-inTraining <- 
-    createDataPartition(
-        y = data$Stability.Charge,
-        p = .75,
-        list = FALSE)
-
-training <- dataset_to_train[ inTraining,]
-testing  <- dataset_to_train[-inTraining,]
-
-ctrl <- trainControl(
-    # powtórzona ocena krzyżowa
-    method = "repeatedcv",
-    # liczba podziałów
-    number = 2,
-    # liczba powtórzeń
-    repeats = 5)
-
-fit <- train(Stability.Charge ~ .,
-             data = training,
-             method = "rf",
-             trControl = ctrl,
-             # Paramter dla algorytmu uczącego
-             ntree = 10)
-
-fit
-```
-```{r}
-idx <- createDataPartition(data$Gravimetric.Capacity,p=0.7, list=F)
-d1 <- data.frame(gravimetricCapacity=data[idx,]$Gravimetric.Capacity)
-d2 <- data.frame(gravimetricCapacity=data[-idx,]$Gravimetric.Capacity)
-
-ggplot(mapping=aes(alpha=0.4)) + 
- geom_density(aes(gravimetricCapacity, fill="red"), d1) + 
- geom_density(aes(gravimetricCapacity, fill="blue"), d2) + 
- theme_minimal()
-```
-
-Przygotowanie zbioru do trenowania
-
-Ze zbioru usunięto atrybuty: \
-- ID - nie ma wpływu na zmienną celu
-- Battery.Formula - bardzo dużo unikalnych wartości, więcej niż połowa rozmiaru zbioru, istnieje ryzyko przeuczenia i nadmiernej segmentacji
-- Formula.Charge - podobnie jak  Battery.Formula - bardzo dużo unikalnych wartości
-- Formula.Discharge - podobnie jak wyżej
-
-Skalowanie i normalizacja zmiennych
-
-```{r}
-#dataset_train_selected_attr  <- select(data, -c(Battery.ID, Battery.Formula, Formula.Charge, Formula.Discharge))
-dataset_numerical_attrs <- select(data, numerical_attrs)
-preProc <- preProcess(dataset_numerical_attrs, method = c("center", "scale"))
-data_scaled <- predict(preProc, newdata = dataset_numerical_attrs)
-data_scaled$Working.Ion <- data$Working.Ion
-data_scaled
-
-data_scaled <- dataset_numerical_attrs
-
-skim(data_scaled)
-
-dummies <- dummyVars("~ .", data = data_scaled)
-data_transformed <- data.frame(predict(dummies, newdata = data_scaled))
-
-head(data_transformed)
-
-anova_result <- aov(Gravimetric.Capacity ~ Battery.Formula, data = data)
-summary(anova_result)
-```
-
-Usunięcie zmiennych skorelowanych
-
-```{r}
-# Usunięcie zmiennych skorelowanych
-cor_matrix <- cor(data_transformed)
-high_corr <- findCorrelation(cor_matrix, cutoff = 0.8)
-data_reduced <- data_transformed[, -high_corr]
-colnames(data_reduced[high_corr])
-
-targetAttr <- "Volumetric.Energy"
-target <- data_reduced$Volumetric.Energy
-predictors <- data_reduced[, -which(names(data_reduced) == targetAttr)]
-
-#data_reduced <- dataset_numerical_attrs
-#data_reduced
-
-# Podział danych
-set.seed(123)
-trainIndex <- createDataPartition(target, p = 0.7, list = FALSE)
-trainData <- data_reduced[trainIndex, ]
-testData <- data_reduced[-trainIndex, ]
-
-ggplot() +
-  geom_density(data = trainData, aes(x = !!sym(targetAttr), fill = "Train"), alpha = 0.3) +
-  geom_density(data = testData, aes(x = !!sym(targetAttr), fill = "Test"), alpha = 0.3) +
-  scale_fill_manual(values = c("Train" = "red", "Test" = "blue")) +
-  theme_minimal() +
-  labs(title = "Porównanie rozkładu zmiennej celu w zbiorach treningowym i testowym",
-       x = targetAttr,
-       y = "Gęstość",
-       fill = "Zbiór")
-
-
-targetAttr <- "Volumetric.Energy"
-formula <- as.formula(paste(targetAttr, "~ ."))
-
-model <- train(
-  formula, 
-  data = trainData, 
-  method = "lm", 
-  trControl = trainControl(method = "cv", number = 10)
-)
-
-summary(model)
-
-predictions <- predict(model, newdata = testData)
-postResample(predictions, testData[[targetAttr]])
-
-plot(testData[[targetAttr]], predictions, 
-     main = paste("Predicted vs Actual", targetAttr),
-     xlab = "Rzeczywiste", ylab = "Przewidywane")
-abline(0, 1, col = "red")
-
-```
-
-```{r}
-library(Metrics)
-
-numerical <- select(data, -c(Battery.ID, Battery.Formula))
-high_cor_attributes <- cor_matrix %>% findCorrelation(cutoff = 0.8, names = TRUE)
-
-data_reduced <- select(data_transformed, -(high_cor_attributes))
-
-idx <- createDataPartition(data_reduced$Volumetric.Energy, p=0.7, list=F)
-
-train_data <- data_reduced[idx, ]
-test_data <- data_reduced[-idx, ]
-
-ggplot(mapping = aes(alpha = 0.4)) + 
-  geom_density(aes(x = Volumetric.Energy, fill = "red"), data = train_data) + 
-  geom_density(aes(x = Volumetric.Energy, fill = "blue"), data = test_data) + 
-  theme_minimal()
-
-
-model <- train(
-  Volumetric.Energy~., 
-  data = train_data, 
-  method = "lm", 
-  trControl = trainControl(method = "cv", number = 10)
-)
-
-summary(model)
-
-predictions <- predict(model, newdata = test_data)
-
-# Compare predicted vs actual values
-comparison <- data.frame(Actual = test_data$Volumetric.Energy, Predicted = predictions)
-
-
-print(comparison)
-postResample(predictions, test_data$Volumetric.Energy)
-
-rmse_value <- rmse(test_data$Volumetric.Energy, predictions)
-cat("RMSE:", rmse_value, "\n")
-
-ggplot(comparison, aes(x = Actual, y = Predicted)) +
-  geom_point(alpha = 0.5) +
-  geom_abline(intercept = 0, slope = 1, color = "red") +
-  labs(title = "Actual vs Predicted Values",
-       x = "Actual Volumetric Energy",
-       y = "Predicted Volumetric Energy") +
-  theme_minimal()
-
-```
 ### Preprocessing danych
 
-Preprocessing danych obejmuje następujące kroki:
-- Usunięcie atrybutów, które nie mają wpływu na zmienną celu  
+Preprocessing danych jest kluczowym etapem przygotowania zbioru treningowego, ponieważ wpływa bezpośrednio na jakość, precyzję i zdolność predykcyjną modelu, eliminując szumy, redundancje i potencjalne źródła błędów, co ostatecznie decyduje o skuteczności i wiarygodności całego modelu.
 
 ```{r}
-battery_train_data <- select(data, -c(Battery.ID, Battery.Formula))
-high_cor_attributes <- cor_matrix %>% findCorrelation(cutoff = 0.8, names = TRUE)
-high_cor_attributes
+attributes_to_remove <- colnames(select(data, c(Battery.ID, Battery.Formula, Formula.Discharge)))
 ```
 
-- Usunięcie zmiennych wysoko skorelowanych ze zmienną celu. Atrybuty, które zostały usunięte to `r high_cor_attributes`.
-
+W pierwszym kroku usunięto wybrane kolumny takie jak `r attributes_to_remove`, które nie wnosiły bezpośrednich informacji numerycznych do modelowania.
 
 ```{r}
-train <- select(battery_train_data, -(high_cor_attributes))
+battery_train_data <- select(data, -(attributes_to_remove))
+cor_thereshold <- 0.8
+cor_with_target <- cor(dataset_numerical_attrs, use = "pairwise.complete.obs")[, "Volumetric.Energy"]
+high_cor_to_target <- names(which(cor_with_target > 0.8))
+battery_train_data <- battery_train_data %>%
+  select(-all_of(high_cor_to_target), Volumetric.Energy)
+
 ```
 
+Następnie, obliczono korelację zmiennych numerycznych ze zmienną celu, zidentyfikowano i usunięto zmienne o wysokiej korelacji liniowej (przekraczającej wartość `r cor_thereshold`). Atrybuty, które zostały usunięte to `r high_cor_to_target`.
 
 ```{r}
 
@@ -1018,7 +816,7 @@ detect_outliers <- function(x) {
   return(x < (Q1 - 1.5 * IQR) | x > (Q3 + 1.5 * IQR))
 }
 
-outlier_matrix <- as.data.frame(lapply(train, function(column) {
+outlier_matrix <- as.data.frame(lapply(battery_train_data, function(column) {
   if (is.numeric(column)) {
     return(detect_outliers(column))
   } else {
@@ -1027,18 +825,20 @@ outlier_matrix <- as.data.frame(lapply(train, function(column) {
 }))
 
 outlier_count <- rowSums(outlier_matrix)
-nrow(train[outlier_count >= outlier_threshold,])
+nrow(battery_train_data[outlier_count >= outlier_threshold,])
 
-data_cleaned <- train[outlier_count < outlier_threshold, ]
+data_cleaned <- battery_train_data[outlier_count < outlier_threshold, ]
 skim(data_cleaned)
 ```
-- Wyczyszczenie wartości odstających. Do identyfikacji outlierów wykorzystano metodę IQR. Usunięto rekordy, które posiadały wartości odstające na co najmniej `r outlier_threshold` atrybutach.
- Zostało usuniętych `r nrow(train[outlier_count >= outlier_threshold,])` rekordów.
+W procesie preprocessingu danych jednym z kluczowych etapów była identyfikacja i usunięcie obserwacji odstających w zbiorze danych. W tym celu zdefiniowano próg dla liczby odstających wartości w danej obserwacji (outlier_threshold), który ustalono na poziomie 2. Następnie, wykorzystując metodę opartą na analizie rozstępu międzykwartylowego (IQR), zidentyfikowano wartości odstające w każdej kolumnie numerycznej zbioru danych.
 
-- Normalizacja danych
+Funkcja ta oblicza pierwszy (Q1) i trzeci kwartyl (Q3) dla każdej zmiennej, a następnie określa zakres wartości uznawanych za normalne, wyznaczony przez przedział [Q1−1.5⋅IQR,Q3+1.5⋅IQR]. Wartości spoza tego zakresu są oznaczane jako odstające. Na tej podstawie wygenerowano macierz logiczną, gdzie każda komórka wskazuje, czy dana wartość w zbiorze danych jest odstająca.
+
+Dla każdej obserwacji w zbiorze danych policzono następnie liczbę odstających wartości. Obserwacje zawierające co najmniej dwie wartości odstające (zgodnie z ustalonym progiem) zostały oznaczone jako potencjalnie problematyczne. Takie obserwacje zostały wykluczone z dalszej analizy, co pozwoliło oczyścić dane i zminimalizować ich wpływ na model.
+Zostało usuniętych `r nrow(battery_train_data[outlier_count >= outlier_threshold,])` rekordów.
 
 ```{r}
-data_scaled <- as.data.frame(lapply(train, function(col) {
+data_scaled <- as.data.frame(lapply(data_cleaned, function(col) {
   if (is.numeric(col)) {
     rescale(col)
   } else {
@@ -1049,7 +849,9 @@ data_scaled <- as.data.frame(lapply(train, function(col) {
 skim(data_scaled)
 ```
 
+Następnie dane zostały znormalizowane, do czego wykorzystano funkcję *rescale*.
 
+Dane zostały podzielone na zbiory treningowy (70%) i testowy (30%). Podczas trenowania modelu zastosowano metodę walidacji krzyżowej, aby zapewnić jego stabilność i uogólnioną jakość. Dodatkowo, aby upewnić się, że rozkłady zmiennej celu są podobne w obu zbiorach, zwizualizowano je na poniższym wykresie gęstości.
 
 ```{r}
 
@@ -1068,19 +870,20 @@ ggplot(mapping = aes(alpha = 0.4)) +
 ```
 
 ```{r}
-model <- train(
+model<- lm(
   Volumetric.Energy~., 
   data = train_data, 
-  method = "lm", 
   trControl = ctrl
 )
 ```
+
+
+### Ocena modelu
 
 ```{r}
 
 model_summary <- summary(model)
 
-model_summary
 residuals_summary <- summary(model_summary$residuals)
 
 residuals_summary_df <- data.frame(
@@ -1088,21 +891,230 @@ residuals_summary_df <- data.frame(
   Value = as.numeric(residuals_summary)
 )
 
-#kable(residuals_summary_df, caption = "Podsumowanie reszt modelu", digits = 3)
-
-# Extracting coefficients
 coefficients_df <- as.data.frame(coef(model))
-
-# Adding a column for variable names
 coefficients_df <- tibble::rownames_to_column(coefficients_df, "Term")
 
-# Displaying with kable
-kable(coefficients_df, caption = "Model Coefficients", digits = 3)
-
-
-#kable(residuals_summary_df, caption = "Podsumowanie reszt modelu", digits = 3)
 ```
 
+Poniższy wykres przestawia zależność między wartościami rzeczywistymi a predykcjami modelu.
+
+```{r}
+ggplot(data = data.frame(train_data$Volumetric.Energy, model$fitted.values), 
+       aes(x = train_data$Volumetric.Energy, y = model$fitted.values)) +
+  geom_point(color = "#00000080", size = 2) +
+  geom_abline(slope = 1, intercept = 0, color = "blue", size = 1.5) +
+  theme_minimal() +
+  labs(x = "Wartości rzeczywiste", 
+       y = "Predykcja modelu",
+       title = "Wartości rzeczywiste a predykcja modelu") +
+  theme(text = element_text(family = "sans"),
+        plot.title = element_text(size = 14, face = "bold")) 
+```
+```{r}
+rmse_value <- rmse(test_data$Volumetric.Energy, predictions)
+```
+RMSE wynosi `r round(rmse_value, 4)`.
+
+```{r}
+
+model_summary <- summary(model)
+
+coefficients <- tidy(model) 
+model_metrics <- glance(model) 
+print(coefficients)
+print(model_metrics)
+
+residuals <- resid(model)
+fitted <- fitted(model)
 
 
+residuals_fitted_plot <- ggplot(data = data.frame(residuals, fitted), aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.6, color = "blue") +  
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Reszty vs Dopasowane wartości", x = "Dopasowane wartości", y = "Reszty") +
+  theme_minimal()
 
+qq_plot <- ggplot(data = data.frame(residuals), aes(sample = residuals)) +
+  stat_qq(color = "blue", alpha = 0.6) +  
+  stat_qq_line(color = "red") + 
+  labs(title = "Wykres Q-Q dla reszt", x = "Teoretyczne kwantyle", y = "Kwantyle próby") +
+  theme_minimal()
+
+residuals_hist <- ggplot(data = data.frame(residuals), aes(x = residuals)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "blue", alpha = 0.6) +
+  geom_density(color = "red", size = 1) +
+  labs(title = "Histogram reszt", x = "Reszty", y = "Gęstość") +
+  theme_minimal()
+
+predictions <- predict(model, newdata = train_data)
+observed <- train_data$Volumetric.Energy
+observed_predicted_plot <- ggplot(data = data.frame(observed, predictions), aes(x = observed, y = predictions)) +
+  geom_point(alpha = 0.6, color = "blue") +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red") +
+  labs(title = "Rzeczywiste a przewidywane wartości", x = "Rzeczywiste", y = "Przewidywane") +
+  theme_minimal()
+
+grid.arrange(residuals_fitted_plot, qq_plot, residuals_hist, observed_predicted_plot, ncol = 2)
+
+```
+Wykres "Residuals vs Fitted" sugeruje, że założenie liniowości modelu jest spełnione - rozkład reszt wokół linii zerowej nie wykazuje żadnych wyraźnych wzorców czy tendencji, co świadczy o poprawnej specyfikacji modelu. Dodatkowo, Q-Q plot reszt wykazuje, iż rozkład ten jest zbliżony do normalnego, potwierdzając tym samym kolejne ważne założenie regresji. Histogram reszt również potwierdza ten wniosek, prezentując symetryczny kształt typowy dla rozkładu normalnego. Jednocześnie, wykres ten sugeruje obecność pojedynczej obserwacji odstającej, która może wymagać dalszej analizy lub korekty.
+Kluczowym elementem oceny jakości modelu jest wykres "Observed vs Predicted", który pokazuje, że przewidywane przez model wartości ściśle odpowiadają rzeczywistym obserwacjom - punkty układają się wzdłuż linii o nachyleniu zbliżonym do 1, co świadczy o dobrym dopasowaniu modelu. Nieznaczne odchylenia od linii idealnej są normalne i wynikają z występowania reszt, które nie zostały w pełni wytłumaczone przez model.
+
+```{r}
+coefficients <- summary(model)$coefficients
+coefficients_sorted <- coefficients[order(abs(coefficients[, "Estimate"]), decreasing = TRUE), ]
+
+datatable(coefficients_sorted, 
+          options = list(pageLength = 10, 
+                         autoWidth = TRUE,
+                         searchHighlight = TRUE))
+```
+```{r}
+importance <- varImp(model)
+
+sorted_attr_importance <- importance %>%
+  arrange(desc(Overall))
+
+sorted_attr_importance
+
+```
+
+Model wykazuje wysoką skuteczność w przewidywaniu zmiennej celu, co potwierdza współczynnik determinacji ${R}^2$ wynoszący 0.9356. Oznacza to, że aż 93.56% zmienności zmiennej zależnej jest wyjaśniane przez model, co jest bardzo dobrym wynikiem. Skorygowany ${R}^2$ na poziomie 0.8621 pokazuje, że model nie tylko dobrze dopasowuje się do danych treningowych, ale również zachowuje dobrą jakość prognozowania po uwzględnieniu liczby zmiennych w modelu.
+
+Statystyka F dla modelu wynosi 12.73, a wartość p jest mniejsza niż 2.2e-16, co oznacza, że model jest statystycznie istotny i jego dopasowanie jest lepsze niż w przypadku modelu, który nie uwzględnia żadnych zmiennych. Wartość ta potwierdza, że model skutecznie wykorzystuje dane do przewidywań.
+
+Dodatkowo, na wykresie „residua vs. dopasowane wartości” widzimy, że reszty są rozproszone wokół poziomej linii, co sugeruje losowość błędów i potwierdza poprawne założenie o niezależności reszt. Wykres Q-Q pokazuje, że reszty są bliskie rozkładowi normalnemu, co jest kolejnym pozytywnym sygnałem, wspierającym założenia regresji. Histogram reszt również pokazuje, że większość z nich jest skoncentrowana wokół zera, ale ich rozkład jest nieco spłaszczony, co może wskazywać na lekkie odstępstwa od normalności, lecz bez większego wpływu na jakość modelu.
+
+Ostatni wykres – „zaobserwowane vs. przewidywane” – prezentuje, że wartości przewidywane są bliskie rzeczywistym, co świadczy o wysokiej trafności modelu. 
+
+
+## Predykcja średniego napięcia metodą random forest
+
+W rozdziale zostanie przeanalizowana predykcja średniego napięcia (Average Voltage) przy użyciu modelu Random Forest. Model ten pozwala uchwycić nieliniowe zależności i zidentyfikować kluczowe czynniki wpływające na napięcie. Przedstawione zostaną miary jakości oraz znaczenie zmiennych.
+
+```{r}
+attributes_to_remove_rf <- colnames(select(data, c(Battery.ID, Battery.Formula, Formula.Discharge, Formula.Charge)))
+```
+
+W pierwszym kroku usunięto wybrane kolumny takie jak `r attributes_to_remove_rf`, które nie wnosiły bezpośrednich informacji do modelowania.
+
+```{r}
+train_data_rf <- select(data, -(attributes_to_remove_rf))
+cor_thereshold <- 0.8
+cor_with_target <- cor(dataset_numerical_attrs, use = "pairwise.complete.obs")[, "Average.Voltage"]
+high_cor_to_target <- names(which(cor_with_target > 0.8))
+train_data_rf <- train_data_rf  %>%
+  select(-all_of(high_cor_to_target), Average.Voltage)
+
+```
+
+Następnie, obliczono korelację zmiennych numerycznych ze zmienną celu, zidentyfikowano i usunięto zmienne o wysokiej korelacji liniowej (przekraczającej wartość `r cor_thereshold`). Atrybuty, które zostały usunięte to `r high_cor_to_target`.
+
+```{r}
+
+outlier_threshold <- 2
+
+outlier_matrix <- as.data.frame(lapply(train_data_rf, function(column) {
+  if (is.numeric(column)) {
+    return(detect_outliers(column))
+  } else {
+    return(rep(FALSE, length(column)))
+  }
+}))
+
+outlier_count <- rowSums(outlier_matrix)
+nrow(train_data_rf[outlier_count >= outlier_threshold,])
+
+data_cleaned_rf <- train_data_rf[outlier_count < outlier_threshold, ]
+skim(data_cleaned_rf)
+```
+
+```{r}
+data_rf <- train_data_rf
+head(data_rf)
+idx_rf <- createDataPartition(data_rf$Average.Voltage, p=0.7, list=F)
+
+train_data_rf <- data_rf[idx, ]
+test_data_rf <- data_rf[-idx, ]
+
+ctrl <- trainControl(method = "cv", number = 10)
+
+ggplot(mapping = aes(alpha = 0.4)) + 
+  geom_density(aes(x = Average.Voltage, fill = "red"), data = train_data_rf) + 
+  geom_density(aes(x = Average.Voltage, fill = "blue"), data = test_data_rf) + 
+  theme_minimal()
+
+```
+Zbiory mają zbliżone rozkłady zmiennej celu.
+
+```{r}
+
+model_rf <- train(
+  Average.Voltage ~., 
+  data = train_data_rf, 
+  method = "rf", 
+  metric = "RMSE",
+  trControl = ctrl, 
+  tuneGrid = expand.grid(mtry=3)
+  )
+
+predictions <- predict(model_rf, newdata = test_data_rf)
+
+```
+### Ocena modelu
+
+W celu oceny jakości modeli wykorzystano metryki RMSE, R-squared i MAE, ponieważ umożliwiają one kompleksową analizę błędów predykcji oraz dopasowania modelu do danych.
+
+```{r}
+
+ggplot(data.frame(Actual = test_data_rf$Average.Voltage, Predicted = predictions), aes(x = Actual, y = Predicted)) +
+  geom_point(alpha = 0.6, color = "blue") +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  labs(title = "Wartości rzeczywiste a predykcja", x = "Rzeczywiste", y = "Przewidywane")
+
+results <- data.frame(
+  Metryka = c("RMSE", "R-squared", "MAE"),
+  Wartość = c(
+    model_rf$results$RMSE,     
+    model_rf$results$Rsquared,
+    model_rf$results$MAE
+  )
+)
+
+kable(
+  results,
+  col.names = c("Metryka", "Wartość"),
+  align = "c",
+  caption = "Wyniki modelu Random Forest"
+)
+```
+
+RMSE wskazuje, że przeciętny błąd predykcji wynosi około 0.75. Atrybut przyjmuje wartości z przedziału (-7;5.5), a więc RMSE jest stosunkowo niski. Sugeruje to, że model dobrze przewiduje wartość napięcia w większości przypadków, przy umiarkowanym błędzie.
+Wartość $R^2 = 0.835$ oznacza, że model wyjaśnia 83.5% zmienności zmiennej zależnej. Jest to bardzo dobry wynik, wskazujący, że model dobrze dopasowuje się do danych i większość obserwacji może być przewidziana na podstawie dostępnych cech.
+
+```{r}
+
+importance_df <- variable_importance$importance %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column(var = "Variable") %>%
+  arrange(desc(Overall))
+
+ggplot(importance_df, aes(x = reorder(Variable, Overall), y = Overall)) +
+  geom_bar(stat = "identity", fill = "steelblue", alpha = 0.8) +
+  coord_flip() +
+  labs(
+    title = "Ważność zmiennych (Random Forest)",
+    x = "Zmienna",
+    y = "Znaczenie (Overall)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12)
+  )
+
+```
+Najbardziej istotne zmienne dla predykcji modelu to energia grawimetryczna i wolumetryczna. 
+
+# Źródła
