@@ -256,7 +256,7 @@ Pozostałe jony, takie jak wapń (Ca), magnez (Mg), i cynk (Zn), również znajd
 
 ------------
 
-Poniżej znajdują się interkatywne wykresy pudełkowe dla każdej zmiennej numerycznej w zbiorze danych z podziałem na główne jony. Wykresy te umożliwiają eksplorację rozkładu wartości, identyfikację potencjalnych wartości odstających oraz porównanie zmienności w każdej zmiennej dla poszególnych jonów.
+Poniżej znajdują się interaktywne wykresy pudełkowe dla każdej zmiennej numerycznej w zbiorze danych z podziałem na główne jony. Wykresy te umożliwiają eksplorację rozkładu wartości, identyfikację potencjalnych wartości odstających oraz porównanie zmienności w każdej zmiennej dla poszególnych jonów.
 
 ```{r interactive_boxplots, results='hide', fig.keep = 'none', fig.width=14}
 for (attr_name in numerical_attrs) {
@@ -955,6 +955,8 @@ datatable(coefficients_sorted,
                          autoWidth = TRUE,
                          searchHighlight = TRUE))
 ```
+
+
 ```{r}
 importance <- varImp(model)
 
@@ -962,7 +964,6 @@ sorted_attr_importance <- importance %>%
   arrange(desc(Overall))
 
 sorted_attr_importance
-
 ```
 
 
@@ -990,7 +991,7 @@ Następnie, obliczono korelację zmiennych numerycznych ze zmienną celu, zident
 
 ```{r}
 
-outlier_threshold <- 2
+outlier_threshold <- 3
 
 outlier_matrix <- as.data.frame(lapply(train_data_rf, function(column) {
   if (is.numeric(column)) {
@@ -1001,11 +1002,13 @@ outlier_matrix <- as.data.frame(lapply(train_data_rf, function(column) {
 }))
 
 outlier_count <- rowSums(outlier_matrix)
-nrow(train_data_rf[outlier_count >= outlier_threshold,])
+removed_attrs <- nrow(train_data_rf[outlier_count >= outlier_threshold,])
 
 data_cleaned_rf <- train_data_rf[outlier_count < outlier_threshold, ]
 skim(data_cleaned_rf)
 ```
+
+Ze zbioru usunięto `r removed_attrs` rekordów.
 
 ```{r}
 data_rf <- train_data_rf
@@ -1023,6 +1026,7 @@ ggplot(mapping = aes(alpha = 0.4)) +
   theme_minimal()
 
 ```
+
 Zbiory mają zbliżone rozkłady zmiennej celu.
 
 ```{r}
