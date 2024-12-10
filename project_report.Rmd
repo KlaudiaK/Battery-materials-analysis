@@ -1071,8 +1071,8 @@ kable(
 )
 ```
 
-RMSE wskazuje, że przeciętny błąd predykcji wynosi około 0.75. Atrybut przyjmuje wartości z przedziału (-7;5.5), a więc RMSE jest stosunkowo niski. Sugeruje to, że model dobrze przewiduje wartość napięcia w większości przypadków, przy umiarkowanym błędzie.
-Wartość $R^2 = 0.835$ oznacza, że model wyjaśnia 83.5% zmienności zmiennej zależnej. Jest to bardzo dobry wynik, wskazujący, że model dobrze dopasowuje się do danych i większość obserwacji może być przewidziana na podstawie dostępnych cech.
+RMSE wskazuje, że przeciętny błąd predykcji wynosi około 0.53. Atrybut przyjmuje wartości z przedziału (-7;5.5), a więc RMSE jest stosunkowo niski. Sugeruje to, że model dobrze przewiduje wartość napięcia w większości przypadków, przy umiarkowanym błędzie.
+Wartość $R^2 = 0.894$ oznacza, że model wyjaśnia 89.4% zmienności zmiennej zależnej. Jest to bardzo dobry wynik, wskazujący, że model dobrze dopasowuje się do danych i większość obserwacji może być przewidziana na podstawie dostępnych cech.
 
 ```{r}
 
